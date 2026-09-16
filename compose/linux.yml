@@ -1,0 +1,19 @@
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: ${TS_HOSTNAME:?Set TS_HOSTNAME in .env}
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./config/tailscale:/var/lib/tailscale
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY:?Set TS_AUTHKEY in your shell environment, not in .env}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_ROUTES=${TS_ROUTES}
+      - TS_ACCEPT_DNS=false
+      - TS_EXTRA_ARGS=--accept-routes
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}

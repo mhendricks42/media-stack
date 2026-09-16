@@ -1,0 +1,18 @@
+{
+  "indexers": [
+    {
+      "schemaName": "0Magnet",
+      "name": "0Magnet",
+      "enable": false,
+      "priority": 25,
+      "appProfileId": 1,
+      "fields": {
+        "baseUrl": "https://16mag.net/",
+        "torrentBaseSettings.seedRatio": 1,
+        "torrentBaseSettings.seedTime": 1440,
+        "torrentBaseSettings.packSeedTime": 1440,
+        "torrentBaseSettings.preferMagnetUrl": true
+      }
+    }
+  ]
+}

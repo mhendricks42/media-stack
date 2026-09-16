@@ -1,0 +1,4 @@
+services:
+  jellyfin:
+    devices:
+      - /dev/dri:/dev/dri

@@ -1,0 +1,161 @@
+########################################################################
+# Home media stack base
+#
+# This file is platform-neutral. Pair it with one overlay:
+#   Linux:   compose/linux.yml
+#   Windows: compose/windows.yml
+#
+# Use env templates in env/ to set COMPOSE_FILE and platform defaults.
+########################################################################
+
+networks:
+  medianet:
+    driver: bridge
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - medianet
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:8080:8080
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:6881:6881
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:6881:6881/udp
+    volumes:
+      - ./config/gluetun:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=nordvpn
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=${NORD_USER:?Set NORD_USER in your shell environment, not in .env}
+      - OPENVPN_PASSWORD=${NORD_PASS:?Set NORD_PASS in your shell environment, not in .env}
+      - SERVER_COUNTRIES=${VPN_COUNTRY:?Set VPN_COUNTRY in .env}
+      - TZ=${TZ:?Set TZ in .env}
+      - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET:?Set LAN_SUBNET in .env},100.64.0.0/10
+    # healthcheck:
+    #   test: ["CMD", "wget", "-q", "--spider", "https://1.1.1.1"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 5
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - PUID=${PUID:?Set PUID in .env}
+      - PGID=${PGID:?Set PGID in .env}
+      - TZ=${TZ:?Set TZ in .env}
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    volumes:
+      - ./config/qbittorrent:/config
+      - ${DATA_ROOT:?Set DATA_ROOT in .env}:/data
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    networks:
+      - medianet
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - PUID=${PUID:?Set PUID in .env}
+      - PGID=${PGID:?Set PGID in .env}
+      - TZ=${TZ:?Set TZ in .env}
+    volumes:
+      - ./config/prowlarr:/config
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:9696:9696
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    networks:
+      - medianet
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - PUID=${PUID:?Set PUID in .env}
+      - PGID=${PGID:?Set PGID in .env}
+      - TZ=${TZ:?Set TZ in .env}
+    volumes:
+      - ./config/sonarr:/config
+      - ${DATA_ROOT:?Set DATA_ROOT in .env}:/data
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:8989:8989
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    networks:
+      - medianet
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - PUID=${PUID:?Set PUID in .env}
+      - PGID=${PGID:?Set PGID in .env}
+      - TZ=${TZ:?Set TZ in .env}
+    volumes:
+      - ./config/radarr:/config
+      - ${DATA_ROOT:?Set DATA_ROOT in .env}:/data
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:7878:7878
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    networks:
+      - medianet
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - PUID=${PUID:?Set PUID in .env}
+      - PGID=${PGID:?Set PGID in .env}
+      - TZ=${TZ:?Set TZ in .env}
+    volumes:
+      - ./config/bazarr:/config
+      - ${DATA_ROOT:?Set DATA_ROOT in .env}/media:/data/media
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:6767:6767
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    networks:
+      - medianet
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - PUID=${PUID:?Set PUID in .env}
+      - PGID=${PGID:?Set PGID in .env}
+      - TZ=${TZ:?Set TZ in .env}
+    volumes:
+      - ./config/jellyfin:/config
+      - ${DATA_ROOT:?Set DATA_ROOT in .env}/media:/data/media:ro
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:8096:8096
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
+
+  seerr:
+    image: ghcr.io/seerr-team/seerr:latest
+    init: true
+    networks:
+      - medianet
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - TZ=${TZ:?Set TZ in .env}
+    volumes:
+      - ./config/seerr:/app/config
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:5055:5055
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}

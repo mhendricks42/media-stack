@@ -1,0 +1,12 @@
+# Local runtime state
+config/
+
+# Active environment file
+.env
+.env.backup.*
+
+# Local declarative indexer config; may contain private tracker secrets
+indexers.json
+
+# Archives
+backups/
