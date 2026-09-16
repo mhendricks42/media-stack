@@ -1,6 +1,8 @@
 param(
     [string]$QbitUsername = $env:QBIT_USER,
     [string]$QbitPassword = $env:QBIT_PASS,
+    [string]$SabnzbdUsername = $env:SABNZBD_USER,
+    [string]$SabnzbdPassword = $env:SABNZBD_PASS,
     [string]$ProwlarrExternalUrl = 'http://localhost:9696',
     [string]$SonarrExternalUrl = 'http://localhost:8989',
     [string]$RadarrExternalUrl = 'http://localhost:7878',
@@ -9,6 +11,8 @@ param(
     [string]$RadarrInternalUrl = 'http://radarr:7878',
     [string]$QbitInternalHost = 'gluetun',
     [int]$QbitInternalPort = 8080,
+    [string]$SabnzbdInternalHost = 'sabnzbd',
+    [int]$SabnzbdInternalPort = 8080,
     [string]$TvCategory = 'tv',
     [string]$MovieCategory = 'movies',
     [int[]]$SonarrSyncCategories = @(5000),
@@ -28,6 +32,7 @@ trap {
 function Test-BootstrapEnvironment {
     $required = @(
         'QBIT_PASS',
+        'SABNZBD_USER', 'SABNZBD_PASS',
         'SONARR_USER', 'SONARR_PASS',
         'RADARR_USER', 'RADARR_PASS',
         'PROWLARR_USER', 'PROWLARR_PASS',
@@ -132,19 +137,162 @@ function Set-ObjectProperty {
 function Get-DownloadClientSchema {
     param(
         [string]$BaseUrl,
-        [string]$ApiKey
+        [string]$ApiKey,
+        [string]$Implementation
     )
 
     $schemas = @(Invoke-ArrApi -Method GET -Uri "$BaseUrl/api/v3/downloadclient/schema" -ApiKey $ApiKey | ForEach-Object {
         if ($_ -is [System.Array]) { $_ } else { $_ }
     })
     foreach ($schema in $schemas) {
-        if ($schema.implementation -eq 'QBittorrent') {
+        if ($schema.implementation -eq $Implementation) {
             return ,$schema
         }
     }
 
-    throw 'Could not find qBittorrent in the download-client schema.'
+    throw "Could not find $Implementation in the download-client schema."
+}
+
+function Get-SabnzbdApiKey {
+    $configPath = '.\config\sabnzbd\sabnzbd.ini'
+    if (-not (Test-Path $configPath)) {
+        throw "Missing SABnzbd config file: $configPath. Start SABnzbd once before bootstrap."
+    }
+
+    $line = Get-Content $configPath | Where-Object { $_ -match '^api_key\s*=' } | Select-Object -First 1
+    if (-not $line) { throw "SABnzbd config does not contain api_key in $configPath." }
+    $apiKey = ($line -replace '^api_key\s*=\s*', '').Trim()
+    if (-not $apiKey) { throw 'SABnzbd api_key is empty. Start SABnzbd once and rerun bootstrap.' }
+    return $apiKey
+}
+
+function Set-IniValue {
+    param(
+        [string]$Content,
+        [string]$Section,
+        [string]$Key,
+        [string]$Value
+    )
+
+    $escapedSection = [regex]::Escape($Section)
+    $escapedKey = [regex]::Escape($Key)
+    $sectionPattern = "(?m)^\[$escapedSection\]\r?$"
+    if (-not [regex]::IsMatch($Content, $sectionPattern)) {
+        if ($Content -and -not $Content.EndsWith("`n")) { $Content += "`r`n" }
+        $Content += "[$Section]`r`n"
+    }
+
+    $sectionBlockPattern = "(?ms)(^\[$escapedSection\]\r?\n)(.*?)(?=^\[|\z)"
+    $sectionRegex = [System.Text.RegularExpressions.Regex]::new($sectionBlockPattern)
+    $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param($match)
+        $header = $match.Groups[1].Value
+        $body = $match.Groups[2].Value
+        $keyPattern = "(?m)^$escapedKey\s*=.*$"
+        if ([regex]::IsMatch($body, $keyPattern)) {
+            $body = [regex]::Replace($body, $keyPattern, "$Key = $Value")
+        }
+        else {
+            if ($body -and -not $body.EndsWith("`n")) { $body += "`r`n" }
+            $body += "$Key = $Value`r`n"
+        }
+        return $header + $body
+    }
+
+    return $sectionRegex.Replace($Content, $evaluator, 1)
+}
+
+function Set-SabnzbdCategory {
+    param(
+        [string]$Content,
+        [string]$Name,
+        [string]$Directory
+    )
+
+    if (-not [regex]::IsMatch($Content, '(?m)^\[categories\]\r?$')) {
+        if ($Content -and -not $Content.EndsWith("`n")) { $Content += "`r`n" }
+        $Content += "[categories]`r`n"
+    }
+
+    $escapedName = [regex]::Escape($Name)
+    $categoryPattern = "(?ms)(^\[\[$escapedName\]\]\r?\n)(.*?)(?=^\[\[|^\[|\z)"
+    $categoryBlock = "[[$Name]]`r`npriority = 0`r`npp = 3`r`nname = $Name`r`nscript = None`r`ndir = $Directory`r`nnewzbin = `r`n"
+
+    if ([regex]::IsMatch($Content, $categoryPattern)) {
+        $categoryRegex = [System.Text.RegularExpressions.Regex]::new($categoryPattern)
+        $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+            param($match)
+            $body = $match.Groups[2].Value
+            foreach ($entry in @(
+                @{ Key = 'priority'; Value = '0' },
+                @{ Key = 'pp'; Value = '3' },
+                @{ Key = 'name'; Value = $Name },
+                @{ Key = 'script'; Value = 'None' },
+                @{ Key = 'dir'; Value = $Directory },
+                @{ Key = 'newzbin'; Value = '' }
+            )) {
+                $keyPattern = "(?m)^$([regex]::Escape($entry.Key))\s*=.*$"
+                if ([regex]::IsMatch($body, $keyPattern)) {
+                    $body = [regex]::Replace($body, $keyPattern, "$($entry.Key) = $($entry.Value)")
+                }
+                else {
+                    if ($body -and -not $body.EndsWith("`n")) { $body += "`r`n" }
+                    $body += "$($entry.Key) = $($entry.Value)`r`n"
+                }
+            }
+            return $match.Groups[1].Value + $body
+        }
+
+        return $categoryRegex.Replace($Content, $evaluator, 1)
+    }
+
+    $categoriesPattern = '(?ms)(^\[categories\]\r?\n)(.*?)(?=^\[|\z)'
+    $categoriesRegex = [System.Text.RegularExpressions.Regex]::new($categoriesPattern)
+    $appendEvaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param($match)
+        $body = $match.Groups[2].Value
+        if ($body -and -not $body.EndsWith("`n")) { $body += "`r`n" }
+        return $match.Groups[1].Value + $body + $categoryBlock
+    }
+
+    return $categoriesRegex.Replace($Content, $appendEvaluator, 1)
+}
+
+function Ensure-SabnzbdConfig {
+    param(
+        [string]$Username,
+        [string]$Password
+    )
+
+    if ($Password.Length -lt 6) {
+        throw 'SABNZBD_PASS must be at least 6 characters long.'
+    }
+
+    $configPath = '.\config\sabnzbd\sabnzbd.ini'
+    if (-not (Test-Path $configPath)) {
+        throw "Missing SABnzbd config file: $configPath. Start SABnzbd once before bootstrap."
+    }
+
+    $configContent = Get-Content -Raw $configPath
+    $updatedContent = $configContent
+    $updatedContent = Set-IniValue -Content $updatedContent -Section 'misc' -Key 'host' -Value '0.0.0.0'
+    $updatedContent = Set-IniValue -Content $updatedContent -Section 'misc' -Key 'port' -Value '8080'
+    $updatedContent = Set-IniValue -Content $updatedContent -Section 'misc' -Key 'username' -Value $Username
+    $updatedContent = Set-IniValue -Content $updatedContent -Section 'misc' -Key 'password' -Value $Password
+    $updatedContent = Set-IniValue -Content $updatedContent -Section 'misc' -Key 'download_dir' -Value '/data/usenet/incomplete'
+    $updatedContent = Set-IniValue -Content $updatedContent -Section 'misc' -Key 'complete_dir' -Value '/data/usenet/complete'
+    $updatedContent = Set-SabnzbdCategory -Content $updatedContent -Name 'tv' -Directory 'tv'
+    $updatedContent = Set-SabnzbdCategory -Content $updatedContent -Name 'movies' -Directory 'movies'
+
+    if ($updatedContent -eq $configContent) {
+        Write-Host 'SABnzbd UI credentials and download paths verified.'
+        return
+    }
+
+    Invoke-DockerComposeQuiet -Arguments @('stop', 'sabnzbd')
+    [System.IO.File]::WriteAllText((Resolve-Path $configPath), $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
+    Invoke-DockerComposeQuiet -Arguments @('up', '-d', 'sabnzbd')
+    Write-Host 'SABnzbd UI credentials and download paths configured.'
 }
 
 function Get-QbitSession {
@@ -197,6 +345,25 @@ function Wait-QbitWebUi {
     }
 
     throw "qBittorrent Web UI did not become ready within 60 seconds after restart. Last error: $lastError"
+}
+
+function Wait-SabnzbdWebUi {
+    $lastError = ''
+    for ($attempt = 1; $attempt -le 60; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri 'http://localhost:8081' -UseBasicParsing -TimeoutSec 5 | Out-Null
+            return
+        }
+        catch {
+            $lastError = $_.Exception.Message
+            if ($_.Exception.Response) {
+                return
+            }
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    throw "SABnzbd Web UI did not become ready within 60 seconds after restart. Last error: $lastError"
 }
 
 function Get-QbitPasswordHash {
@@ -283,6 +450,7 @@ function Set-QbitDownloadSettings {
     Invoke-DockerComposeQuiet -Arguments @('stop', 'qbittorrent')
     [System.IO.File]::WriteAllText((Resolve-Path $ConfigPath), $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
     Invoke-DockerComposeQuiet -Arguments @('up', '-d', 'qbittorrent')
+    Wait-SabnzbdWebUi
     Wait-QbitWebUi
     return $true
 }
@@ -415,10 +583,10 @@ function Upsert-QbitDownloadClient {
     $clientsUri = "$BaseUrl/api/v3/downloadclient"
     $existing = Find-ResourceByName -Resources @(Invoke-ArrApi -Method GET -Uri $clientsUri -ApiKey $ApiKey) -Name 'qBittorrent'
 
-    $payload = Get-DownloadClientSchema -BaseUrl $BaseUrl -ApiKey $ApiKey
+    $payload = Get-DownloadClientSchema -BaseUrl $BaseUrl -ApiKey $ApiKey -Implementation 'QBittorrent'
     Set-ObjectProperty -Object $payload -Name 'name' -Value 'qBittorrent'
     Set-ObjectProperty -Object $payload -Name 'enable' -Value $true
-    Set-ObjectProperty -Object $payload -Name 'priority' -Value 1
+    Set-ObjectProperty -Object $payload -Name 'priority' -Value 2
     Set-ObjectProperty -Object $payload -Name 'removeCompletedDownloads' -Value $false
     Set-ObjectProperty -Object $payload -Name 'removeFailedDownloads' -Value $true
     Set-ObjectProperty -Object $payload -Name 'tags' -Value @()
@@ -456,6 +624,47 @@ function Upsert-QbitDownloadClient {
     }
 }
 
+function Upsert-SabnzbdDownloadClient {
+    param(
+        [string]$AppName,
+        [string]$BaseUrl,
+        [string]$ApiKey,
+        [string]$SabnzbdApiKey,
+        [string]$CategoryField,
+        [string]$Category
+    )
+
+    $clientsUri = "$BaseUrl/api/v3/downloadclient"
+    $existing = Find-ResourceByName -Resources @(Invoke-ArrApi -Method GET -Uri $clientsUri -ApiKey $ApiKey) -Name 'SABnzbd'
+
+    $payload = Get-DownloadClientSchema -BaseUrl $BaseUrl -ApiKey $ApiKey -Implementation 'Sabnzbd'
+    Set-ObjectProperty -Object $payload -Name 'name' -Value 'SABnzbd'
+    Set-ObjectProperty -Object $payload -Name 'enable' -Value $true
+    Set-ObjectProperty -Object $payload -Name 'priority' -Value 1
+    Set-ObjectProperty -Object $payload -Name 'removeCompletedDownloads' -Value $true
+    Set-ObjectProperty -Object $payload -Name 'removeFailedDownloads' -Value $true
+    Set-ObjectProperty -Object $payload -Name 'tags' -Value @()
+
+    Set-FieldValue -Fields $payload.fields -Name 'host' -Value $SabnzbdInternalHost
+    Set-FieldValue -Fields $payload.fields -Name 'port' -Value $SabnzbdInternalPort
+    Set-FieldValue -Fields $payload.fields -Name 'useSsl' -Value $false
+    Set-FieldValue -Fields $payload.fields -Name 'urlBase' -Value ''
+    Set-FieldValue -Fields $payload.fields -Name 'apiKey' -Value $SabnzbdApiKey
+    Set-FieldValue -Fields $payload.fields -Name 'username' -Value $SabnzbdUsername
+    Set-FieldValue -Fields $payload.fields -Name 'password' -Value $SabnzbdPassword
+    Set-FieldValue -Fields $payload.fields -Name $CategoryField -Value $Category
+
+    if ($existing) {
+        Set-ObjectProperty -Object $payload -Name 'id' -Value $existing.id
+        Invoke-ArrApi -Method PUT -Uri "$clientsUri/$($existing.id)" -ApiKey $ApiKey -Body $payload | Out-Null
+        Write-Host "Updated $AppName download client: SABnzbd"
+    }
+    else {
+        Invoke-ArrApi -Method POST -Uri $clientsUri -ApiKey $ApiKey -Body $payload | Out-Null
+        Write-Host "Created $AppName download client: SABnzbd"
+    }
+}
+
 function Ensure-RootFolder {
     param(
         [string]$AppName,
@@ -481,8 +690,13 @@ if (-not $QbitUsername) { $QbitUsername = 'admin' }
 if (-not $QbitPassword) {
     throw 'Missing QBIT_PASS. Set qBittorrent Web UI password in this shell as $env:QBIT_PASS before bootstrap.'
 }
+if (-not $SabnzbdUsername) { $SabnzbdUsername = 'admin' }
+if (-not $SabnzbdPassword) {
+    throw 'Missing SABNZBD_PASS. Set SABnzbd Web UI password in this shell as $env:SABNZBD_PASS before bootstrap.'
+}
 
 Ensure-QbitCredentials -Username $QbitUsername -Password $QbitPassword
+Ensure-SabnzbdConfig -Username $SabnzbdUsername -Password $SabnzbdPassword
 & "$PSScriptRoot\bootstrap-ui-auth.ps1"
 if ($LASTEXITCODE -ne 0) {
     throw 'UI authentication bootstrap failed; integration bootstrap was not applied.'
@@ -491,12 +705,15 @@ if ($LASTEXITCODE -ne 0) {
 $script:ProwlarrApiKey = Get-ApiKeyFromConfig '.\config\prowlarr\config.xml'
 $sonarrApiKey = Get-ApiKeyFromConfig '.\config\sonarr\config.xml'
 $radarrApiKey = Get-ApiKeyFromConfig '.\config\radarr\config.xml'
+$sabnzbdApiKey = Get-SabnzbdApiKey
 
 Write-Host 'Bootstrapping media stack app links...'
 
 Upsert-ProwlarrApplication -Name 'Sonarr' -Implementation 'Sonarr' -ConfigContract 'SonarrSettings' -BaseUrl $SonarrInternalUrl -ApiKey $sonarrApiKey -SyncCategories $SonarrSyncCategories -AnimeSyncCategories $SonarrAnimeSyncCategories
 Upsert-ProwlarrApplication -Name 'Radarr' -Implementation 'Radarr' -ConfigContract 'RadarrSettings' -BaseUrl $RadarrInternalUrl -ApiKey $radarrApiKey -SyncCategories $RadarrSyncCategories
 
+Upsert-SabnzbdDownloadClient -AppName 'Sonarr' -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey -SabnzbdApiKey $sabnzbdApiKey -CategoryField 'tvCategory' -Category $TvCategory
+Upsert-SabnzbdDownloadClient -AppName 'Radarr' -BaseUrl $RadarrExternalUrl -ApiKey $radarrApiKey -SabnzbdApiKey $sabnzbdApiKey -CategoryField 'movieCategory' -Category $MovieCategory
 Upsert-QbitDownloadClient -AppName 'Sonarr' -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey -CategoryField 'tvCategory' -Category $TvCategory
 Upsert-QbitDownloadClient -AppName 'Radarr' -BaseUrl $RadarrExternalUrl -ApiKey $radarrApiKey -CategoryField 'movieCategory' -Category $MovieCategory
 

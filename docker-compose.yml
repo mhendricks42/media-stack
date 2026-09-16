@@ -61,6 +61,23 @@ services:
       - ${DATA_ROOT:?Set DATA_ROOT in .env}:/data
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
+  sabnzbd:
+    image: lscr.io/linuxserver/sabnzbd:latest
+    networks:
+      - medianet
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - PUID=${PUID:?Set PUID in .env}
+      - PGID=${PGID:?Set PGID in .env}
+      - TZ=${TZ:?Set TZ in .env}
+    volumes:
+      - ./config/sabnzbd:/config
+      - ${DATA_ROOT:?Set DATA_ROOT in .env}:/data
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:8081:8080
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
+
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     networks:

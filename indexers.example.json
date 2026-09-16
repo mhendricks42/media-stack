@@ -1,6 +1,36 @@
 {
   "indexers": [
     {
+      "schemaName": "oznzb",
+      "name": "OZnzb",
+      "enable": false,
+      "priority": 10,
+      "appProfileId": 1,
+      "fields": {
+        "apiKey": "env:OZNZB_API_KEY"
+      }
+    },
+    {
+      "schemaName": "drunkenslug",
+      "name": "DrunkenSlug",
+      "enable": false,
+      "priority": 10,
+      "appProfileId": 1,
+      "fields": {
+        "apiKey": "env:DRUNKENSLUG_API_KEY"
+      }
+    },
+    {
+      "schemaName": "nzbgeek",
+      "name": "NZBGeek",
+      "enable": false,
+      "priority": 10,
+      "appProfileId": 1,
+      "fields": {
+        "apiKey": "env:NZBGEEK_API_KEY"
+      }
+    },
+    {
       "schemaName": "0Magnet",
       "name": "0Magnet",
       "enable": false,

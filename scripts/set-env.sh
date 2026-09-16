@@ -80,6 +80,9 @@ read_secret NORD_PASS "NordVPN OpenVPN/manual password"
 read_value QBIT_USER "qBittorrent Web UI username" "admin"
 read_secret QBIT_PASS "qBittorrent Web UI password" 6
 
+read_value SABNZBD_USER "SABnzbd Web UI username" "admin"
+read_secret SABNZBD_PASS "SABnzbd Web UI password" 6
+
 read_value SONARR_USER "Sonarr UI username" "admin"
 read_secret SONARR_PASS "Sonarr UI password" 6
 

@@ -117,19 +117,23 @@ doctor() {
     if (( had_ts_authkey )); then write_check "TS_AUTHKEY set" 0; else write_check "TS_AUTHKEY set" 1; export TS_AUTHKEY="__doctor_placeholder__"; fi
   fi
 
+  for secret_name in QBIT_PASS SABNZBD_USER SABNZBD_PASS SONARR_USER SONARR_PASS RADARR_USER RADARR_PASS PROWLARR_USER PROWLARR_PASS BAZARR_USER BAZARR_PASS JELLYFIN_USER JELLYFIN_PASS SEERR_EMAIL; do
+    if [[ -n "${!secret_name:-}" ]]; then write_check "$secret_name set" 0; else write_check "$secret_name set" 1; fi
+  done
+
   data_root="$(get_env_file_value DATA_ROOT)"
   if [[ -n "$data_root" ]]; then write_check "DATA_ROOT configured" 0 "$data_root"; else write_check "DATA_ROOT configured" 1; fi
 
   if docker compose config >/dev/null 2>&1; then write_check "compose renders" 0; else write_check "compose renders" 1; fi
 
-  for service in gluetun sonarr radarr prowlarr; do
+  for service in gluetun sabnzbd sonarr radarr prowlarr; do
     container_id="$(docker compose ps -q "$service")"
     if [[ -n "$container_id" ]]; then write_check "$service container" 0; else write_check "$service container" 1; fi
   done
 
   if [[ -n "$(docker compose ps -q sonarr)" ]]; then
-    if docker compose exec -T sonarr sh -lc "test -d /data/torrents -a -d /data/media/tv -a -d /data/media/movies" >/dev/null 2>&1; then write_check "data folders exist" 0; else write_check "data folders exist" 1; fi
-    if docker compose exec -T sonarr sh -lc "rm -f /data/torrents/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; echo test > /data/torrents/doctor-hardlink.txt; ln /data/torrents/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; count=\$(stat -c '%h' /data/torrents/doctor-hardlink.txt); rm -f /data/torrents/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; test \"\$count\" = 2" >/dev/null 2>&1; then write_check "hardlinks work" 0; else write_check "hardlinks work" 1; fi
+    if docker compose exec -T sonarr sh -lc "test -d /data/usenet/incomplete -a -d /data/usenet/complete/tv -a -d /data/usenet/complete/movies -a -d /data/torrents -a -d /data/media/tv -a -d /data/media/movies" >/dev/null 2>&1; then write_check "data folders exist" 0; else write_check "data folders exist" 1; fi
+    if docker compose exec -T sonarr sh -lc "rm -f /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; echo test > /data/usenet/complete/tv/doctor-hardlink.txt; ln /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; count=\$(stat -c '%h' /data/usenet/complete/tv/doctor-hardlink.txt); rm -f /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; test \"\$count\" = 2" >/dev/null 2>&1; then write_check "hardlinks work" 0; else write_check "hardlinks work" 1; fi
   fi
 
   gluetun_container_id="$(docker compose ps -q gluetun)"
@@ -138,7 +142,7 @@ doctor() {
     if [[ "$gluetun_health" == "healthy" ]]; then write_check "gluetun health" 0 "$gluetun_health"; else write_check "gluetun health" 1 "$gluetun_health"; fi
   fi
 
-  for endpoint in http://localhost:9696 http://localhost:8989 http://localhost:7878; do
+  for endpoint in http://localhost:8081 http://localhost:9696 http://localhost:8989 http://localhost:7878; do
     if curl -fsSL --max-time 5 "$endpoint" >/dev/null 2>&1; then write_check "reachable $endpoint" 0; else write_check "reachable $endpoint" 1; fi
   done
 
@@ -177,7 +181,7 @@ case "$cmd" in
     ;;
   setup-data)
     check_docker_engine
-    docker compose exec -T sonarr sh -lc "mkdir -p /data/torrents/incomplete /data/media/tv /data/media/movies; chown -R 1000:1000 /data/torrents /data/media; ls -la /data; ls -la /data/media"
+    docker compose exec -T sonarr sh -lc "mkdir -p /data/usenet/incomplete /data/usenet/complete/tv /data/usenet/complete/movies /data/torrents/incomplete /data/media/tv /data/media/movies; chown -R 1000:1000 /data/usenet /data/torrents /data/media; ls -la /data; ls -la /data/usenet; ls -la /data/media"
     ;;
   bootstrap)
     check_docker_engine

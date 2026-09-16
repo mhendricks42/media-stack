@@ -94,7 +94,7 @@ Write-Host "Using WSL distro: $Distro"
 Write-Host "Using WSL user:   $LinuxUser"
 Write-Host "Data root:        $windowsDataRoot"
 
-Invoke-WslShell $Distro "mkdir -p '$linuxDataRoot/torrents/incomplete' '$linuxDataRoot/media/tv' '$linuxDataRoot/media/movies'"
+Invoke-WslShell $Distro "mkdir -p '$linuxDataRoot/usenet/incomplete' '$linuxDataRoot/usenet/complete/tv' '$linuxDataRoot/usenet/complete/movies' '$linuxDataRoot/torrents/incomplete' '$linuxDataRoot/media/tv' '$linuxDataRoot/media/movies'"
 
 if (-not (Test-Path '.env')) {
     Copy-Item 'env\windows.env.example' '.env'
@@ -124,7 +124,7 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Docker engine is not reachable. Start Docker Desktop and wait until it says Running.'
 }
 
-& docker.exe run --rm -v "${windowsDataRoot}:/mnt/data" alpine:3.20 sh -lc 'test -d /mnt/data/torrents/incomplete -a -d /mnt/data/media/tv -a -d /mnt/data/media/movies' *> $null
+& docker.exe run --rm -v "${windowsDataRoot}:/mnt/data" alpine:3.20 sh -lc 'test -d /mnt/data/usenet/incomplete -a -d /mnt/data/usenet/complete/tv -a -d /mnt/data/usenet/complete/movies -a -d /mnt/data/torrents/incomplete -a -d /mnt/data/media/tv -a -d /mnt/data/media/movies' *> $null
 if ($LASTEXITCODE -ne 0) {
     throw "Docker cannot mount $windowsDataRoot. In Docker Desktop, enable Settings > Resources > WSL Integration > $Distro, click Apply and Restart, then rerun this command."
 }

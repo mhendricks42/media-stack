@@ -71,6 +71,9 @@ Set-SessionEnv 'NORD_PASS' (Read-SecretValue 'NORD_PASS' 'NordVPN OpenVPN/manual
 Set-SessionEnv 'QBIT_USER' (Read-Value 'QBIT_USER' 'qBittorrent Web UI username' 'admin' -Required)
 Set-SessionEnv 'QBIT_PASS' (Read-SecretValue 'QBIT_PASS' 'qBittorrent Web UI password' 6)
 
+Set-SessionEnv 'SABNZBD_USER' (Read-Value 'SABNZBD_USER' 'SABnzbd Web UI username' 'admin' -Required)
+Set-SessionEnv 'SABNZBD_PASS' (Read-SecretValue 'SABNZBD_PASS' 'SABnzbd Web UI password' 6)
+
 Set-SessionEnv 'SONARR_USER' (Read-Value 'SONARR_USER' 'Sonarr UI username' 'admin' -Required)
 Set-SessionEnv 'SONARR_PASS' (Read-SecretValue 'SONARR_PASS' 'Sonarr UI password' 6)
 

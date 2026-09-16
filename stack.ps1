@@ -107,7 +107,7 @@ function Invoke-Doctor {
     if ($tailscaleEnabled) {
         Write-Check 'TS_AUTHKEY set' $hasTsAuthKey
     }
-    foreach ($secretName in @('QBIT_PASS', 'SONARR_USER', 'SONARR_PASS', 'RADARR_USER', 'RADARR_PASS', 'PROWLARR_USER', 'PROWLARR_PASS', 'BAZARR_USER', 'BAZARR_PASS', 'JELLYFIN_USER', 'JELLYFIN_PASS', 'SEERR_EMAIL')) {
+    foreach ($secretName in @('QBIT_PASS', 'SABNZBD_USER', 'SABNZBD_PASS', 'SONARR_USER', 'SONARR_PASS', 'RADARR_USER', 'RADARR_PASS', 'PROWLARR_USER', 'PROWLARR_PASS', 'BAZARR_USER', 'BAZARR_PASS', 'JELLYFIN_USER', 'JELLYFIN_PASS', 'SEERR_EMAIL')) {
         Write-Check "$secretName set" ([bool][Environment]::GetEnvironmentVariable($secretName))
     }
 
@@ -125,7 +125,7 @@ function Invoke-Doctor {
         docker compose config *> $null
         Write-Check 'compose renders' ($LASTEXITCODE -eq 0)
 
-        $services = @('gluetun', 'sonarr', 'radarr', 'prowlarr')
+        $services = @('gluetun', 'sabnzbd', 'sonarr', 'radarr', 'prowlarr')
         foreach ($service in $services) {
             $containerId = (docker compose ps -q $service).Trim()
             Write-Check "$service container" ([bool]$containerId)
@@ -133,10 +133,10 @@ function Invoke-Doctor {
 
         $sonarrContainerId = (docker compose ps -q sonarr).Trim()
         if ($sonarrContainerId) {
-            docker compose exec -T sonarr sh -lc "test -d /data/torrents -a -d /data/media/tv -a -d /data/media/movies" *> $null
+            docker compose exec -T sonarr sh -lc "test -d /data/usenet/incomplete -a -d /data/usenet/complete/tv -a -d /data/usenet/complete/movies -a -d /data/torrents -a -d /data/media/tv -a -d /data/media/movies" *> $null
             Write-Check 'data folders exist' ($LASTEXITCODE -eq 0)
 
-            docker compose exec -T sonarr sh -lc 'rm -f /data/torrents/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; echo test > /data/torrents/doctor-hardlink.txt; ln /data/torrents/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; count=$(stat -c ''%h'' /data/torrents/doctor-hardlink.txt); rm -f /data/torrents/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; test "$count" = 2' *> $null
+            docker compose exec -T sonarr sh -lc 'rm -f /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; echo test > /data/usenet/complete/tv/doctor-hardlink.txt; ln /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; count=$(stat -c ''%h'' /data/usenet/complete/tv/doctor-hardlink.txt); rm -f /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; test "$count" = 2' *> $null
             Write-Check 'hardlinks work' ($LASTEXITCODE -eq 0)
         }
 
@@ -146,7 +146,7 @@ function Invoke-Doctor {
             Write-Check 'gluetun health' ($gluetunHealth -eq 'healthy') $gluetunHealth
         }
 
-        foreach ($endpoint in @('http://localhost:9696', 'http://localhost:8989', 'http://localhost:7878')) {
+        foreach ($endpoint in @('http://localhost:8081', 'http://localhost:9696', 'http://localhost:8989', 'http://localhost:7878')) {
             try {
                 Invoke-WebRequest -Uri $endpoint -UseBasicParsing -TimeoutSec 5 | Out-Null
                 Write-Check "reachable $endpoint" $true
@@ -221,7 +221,7 @@ switch ($Command) {
     }
     'setup-data' {
         Test-DockerEngine
-        docker compose exec -T sonarr sh -lc "mkdir -p /data/torrents/incomplete /data/media/tv /data/media/movies; chown -R 1000:1000 /data/torrents /data/media; ls -la /data; ls -la /data/media"
+        docker compose exec -T sonarr sh -lc "mkdir -p /data/usenet/incomplete /data/usenet/complete/tv /data/usenet/complete/movies /data/torrents/incomplete /data/media/tv /data/media/movies; chown -R 1000:1000 /data/usenet /data/torrents /data/media; ls -la /data; ls -la /data/usenet; ls -la /data/media"
     }
     'env' {
         if ($Arg -eq '--include-tailscale') {

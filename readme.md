@@ -37,7 +37,8 @@ One base Compose file holds everything platform-neutral. Thin overlays add what 
 | Service | Port | Role |
 |---|---|---|
 | Gluetun | — | VPN tunnel. Owns the network namespace qBittorrent runs in. |
-| qBittorrent | 8080 | Download client. No network of its own. |
+| qBittorrent | 8080 | Secondary torrent client. No network of its own. |
+| SABnzbd | 8081 | Primary Usenet download client. Downloads NZBs from your Usenet provider. |
 | Prowlarr | 9696 | Indexer manager. Configure once, syncs to Sonarr and Radarr. |
 | Sonarr | 8989 | TV. Monitors series, grabs episodes, renames and upgrades. |
 | Radarr | 7878 | Movies. Same, for films. |
@@ -53,9 +54,10 @@ Seerr is the merged successor to Overseerr and Jellyseerr. Readarr is deliberate
 ```
                        Seerr
                          │
-              Sonarr / Radarr ────► Prowlarr ────► indexers
-                         │
-              qBittorrent inside Gluetun ────► VPN ────► swarm
+                  Sonarr / Radarr ────► Prowlarr ────► NZB and torrent indexers
+                    │        │
+                    │        └────► qBittorrent inside Gluetun ────► VPN ────► swarm
+                    └─────────────► SABnzbd ────► Usenet provider
                          │
                  /data  (one filesystem)
                          │
@@ -68,9 +70,9 @@ Two network domains live on one host and never talk over the network the way you
 
 **Gluetun's namespace** contains qBittorrent via `network_mode: service:gluetun`. qBittorrent has no interfaces of its own, so if the tunnel drops it has nowhere to send packets. This is a structural kill switch rather than a setting that can be misconfigured.
 
-**The `medianet` bridge** contains everything else. Sonarr queues a download by calling qBittorrent's API at `gluetun:8080` — it never joins the swarm, so it never needs the tunnel.
+**The `medianet` bridge** contains everything else. Sonarr and Radarr prefer SABnzbd at `sabnzbd:8080` for Usenet downloads, and keep qBittorrent at `gluetun:8080` as the secondary torrent client. The arr apps never join the swarm, so they do not need the tunnel.
 
-**`/data`** is the handoff. qBittorrent writes to `/data/torrents`, Sonarr hardlinks into `/data/media/tv`, Jellyfin reads it. Coordination over the bridge, files over the filesystem.
+**`/data`** is the handoff. SABnzbd writes to `/data/usenet`, qBittorrent writes to `/data/torrents`, Sonarr and Radarr import into `/data/media`, and Jellyfin reads the finished library. Coordination over the bridge, files over the filesystem.
 
 ## How the dual-target setup works
 
@@ -148,7 +150,7 @@ $env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/gpu-nvidia.yml
 
 ## Prerequisites
 
-**Both targets:** Docker Engine 24+ with the Compose plugin. A VPN account — this repo assumes NordVPN. Note that Nord's consumer service does not offer port forwarding, so seeding will rely on outbound connections only. If ratio matters, ProtonVPN or PIA have native Gluetun port-forwarding integration.
+**Both targets:** Docker Engine 24+ with the Compose plugin. A Usenet provider account for SABnzbd, plus NZB indexer accounts such as OZnzb, DrunkenSlug, or NZBGeek if you use private indexers. A VPN account is still needed for the secondary torrent path; this repo assumes NordVPN. Note that Nord's consumer service does not offer port forwarding, so torrent seeding will rely on outbound connections only.
 
 **Linux:** any distro with Docker. An Intel CPU with QuickSync if you expect to transcode. A Tailscale account. Install PowerShell 7 (`pwsh`) to use `bootstrap` and `import-indexers`; it keeps those automation commands identical on both platforms.
 
@@ -195,6 +197,7 @@ The helper prompts for:
 - `NORD_USER`
 - `NORD_PASS`
 - `QBIT_PASS` for bootstrap automation
+- `SABNZBD_USER` / `SABNZBD_PASS`
 - `TS_AUTHKEY` for a Tailscale overlay or the optional Windows Tailscale container
 - `SONARR_USER` / `SONARR_PASS`
 - `RADARR_USER` / `RADARR_PASS`
@@ -210,7 +213,7 @@ The Bash helper must be sourced, not executed, because only a sourced script can
 **1. Create the data tree.** One filesystem, three subfolders:
 
 ```bash
-sudo mkdir -p /data/{torrents,media/tv,media/movies}
+sudo mkdir -p /data/{usenet/incomplete,usenet/complete/tv,usenet/complete/movies,torrents/incomplete,media/tv,media/movies}
 sudo chown -R "$USER":"$USER" /data
 ```
 
@@ -241,7 +244,7 @@ Seerr always runs as UID 1000 regardless of `PUID`, so its config directory need
 ./stack.sh config | less
 ```
 
-**5. Start, generate app configs, then bootstrap.** The first `up` creates each application's config files and API keys. `setup-data` creates the shared data tree. `bootstrap` then configures UI logins, qBittorrent paths/seeding limits, Prowlarr app links, download clients, and root folders.
+**5. Start, generate app configs, then bootstrap.** The first `up` creates each application's config files and API keys. `setup-data` creates the shared data tree. `bootstrap` then configures UI logins, SABnzbd paths, qBittorrent paths/seeding limits, Prowlarr app links, download clients, and root folders.
 
 ```bash
 ./stack.sh up
@@ -269,7 +272,7 @@ Docker Desktop reaches Windows drives through a translation layer that does not 
 .\stack.ps1 init-windows
 ```
 
-`init-windows` ensures the Ubuntu WSL distro exists, creates `/home/<you>/data/torrents/incomplete`, `/home/<you>/data/media/tv`, and `/home/<you>/data/media/movies`, writes the matching `\\wsl$\Ubuntu\home\<you>\data` path into `.env`, and validates that Docker can mount it. Everything lands in a VHDX that only grows. Acceptable for a test library, wrong for a real one.
+`init-windows` ensures the Ubuntu WSL distro exists, creates `/home/<you>/data/usenet`, `/home/<you>/data/torrents`, and `/home/<you>/data/media`, writes the matching `\\wsl$\Ubuntu\home\<you>\data` path into `.env`, and validates that Docker can mount it. Everything lands in a VHDX that only grows. Acceptable for a test library, wrong for a real one.
 
 If you use a different distro or WSL user, pass them explicitly:
 
@@ -304,6 +307,7 @@ The container joining the tailnet does not automatically publish every Compose s
 
 ```powershell
 docker compose exec tailscale tailscale serve --http=8989 http://sonarr:8989
+docker compose exec tailscale tailscale serve --http=8081 http://sabnzbd:8080
 docker compose exec tailscale tailscale serve --http=8096 http://jellyfin:8096
 docker compose exec tailscale tailscale serve status
 ```
@@ -334,9 +338,9 @@ Keep that PowerShell window open after `.\stack.ps1 env`; the secrets live only 
 
 Order matters — doing it in this sequence avoids re-entering things.
 
-**1. Run bootstrap after first startup.** Run `up` once before `bootstrap`; the apps need to create their `config/` files and API keys first. Bootstrap then configures UI logins, qBittorrent paths/seeding limits, Prowlarr app links, Sonarr/Radarr download clients, and root folders.
+**1. Run bootstrap after first startup.** Run `up` once before `bootstrap`; the apps need to create their `config/` files and API keys first. Bootstrap then configures UI logins, SABnzbd paths, qBittorrent paths/seeding limits, Prowlarr app links, Sonarr/Radarr download clients, and root folders.
 
-On a fresh installation, bootstrap configures forms authentication for qBittorrent, Sonarr, Radarr, Prowlarr, and Bazarr. It initializes the Jellyfin administrator from `JELLYFIN_USER` / `JELLYFIN_PASS`, then configures Seerr from that Jellyfin administrator using `SEERR_EMAIL`. Passwords are only read from runtime environment variables; qBittorrent uses a salted PBKDF2 hash and Bazarr uses its documented MD5 password hash in their local configuration. No temporary password or manual Web UI configuration is needed. Passwords must be at least six characters long.
+On a fresh installation, bootstrap configures forms authentication for qBittorrent, SABnzbd, Sonarr, Radarr, Prowlarr, and Bazarr. It initializes the Jellyfin administrator from `JELLYFIN_USER` / `JELLYFIN_PASS`, then configures Seerr from that Jellyfin administrator using `SEERR_EMAIL`. Passwords are only read from runtime environment variables; qBittorrent uses a salted PBKDF2 hash and Bazarr uses its documented MD5 password hash in their local configuration. No temporary password or manual Web UI configuration is needed. Passwords must be at least six characters long.
 
 ```powershell
 .\stack.ps1 env
@@ -348,17 +352,21 @@ source ./scripts/set-env.sh
 ./stack.sh bootstrap
 ```
 
-After bootstrap, Prowlarr syncs indexers to Sonarr and Radarr. The download client should already be:
+After bootstrap, Prowlarr syncs indexers to Sonarr and Radarr. SABnzbd is the primary download client and qBittorrent is the secondary fallback:
 
 ```text
-Host: gluetun
-Port: 8080
-Sonarr category: tv-sonarr
+SABnzbd host: sabnzbd
+SABnzbd port: 8080
+SABnzbd categories: tv, movies
+qBittorrent host: gluetun
+qBittorrent port: 8080
+Sonarr category: tv
 Radarr category: movies
-Download path: /data/torrents
+Usenet path: /data/usenet
+Torrent path: /data/torrents
 ```
 
-**2. Configure Prowlarr indexers.** Copy the example, edit it, then import:
+**2. Configure Prowlarr indexers.** Copy the example, edit it, then import. Disabled entries are skipped, so enable only the NZB and torrent indexers you actually have credentials for:
 
 ```powershell
 Copy-Item .\indexers.example.json .\indexers.json
@@ -422,8 +430,8 @@ If usage jumped by the file size, hardlinks are not working. Fix that before add
 ./stack.sh up                 # start
 ./stack.sh ps                 # status
 source ./scripts/set-env.sh   # prompt for session env vars
-./stack.sh setup-data         # create /data/torrents and media folders
-./stack.sh bootstrap          # wire Prowlarr, Sonarr, Radarr, and qBittorrent
+./stack.sh setup-data         # create /data/usenet, /data/torrents, and media folders
+./stack.sh bootstrap          # wire Prowlarr, Sonarr, Radarr, SABnzbd, and qBittorrent
 ./stack.sh import-indexers    # import local indexers.json into Prowlarr
 ./stack.sh doctor             # check Docker, data paths, hardlinks, APIs, and Gluetun
 ./stack.sh logs sonarr        # follow one service
@@ -563,6 +571,8 @@ Back up before upgrading. `./stack.sh backup` or `.\stack.ps1 backup` stops the 
 **Prowlarr rejects the configured login after bootstrap.** Run `.\stack.ps1 env --force`, enter the intended Prowlarr credentials, then rerun `.\stack.ps1 bootstrap`. Bootstrap recreates the Forms user, restarts Prowlarr, and verifies the login redirect before continuing.
 
 **Everything works on the LAN but hangs over Tailscale.** Gluetun's firewall is dropping return traffic to tailnet clients. `FIREWALL_OUTBOUND_SUBNETS` must include `100.64.0.0/10` — it does in the shipped config, so check that your edited `.env` did not lose it.
+
+**SABnzbd cannot download from Usenet.** Bootstrap wires SABnzbd into Sonarr/Radarr, but you still need a Usenet provider configured in SABnzbd. Use SSL, usually port `563`, and the provider credentials from your Usenet account.
 
 **`verify` reports matching IPs.** qBittorrent is not in Gluetun's namespace. Check that `network_mode: "service:gluetun"` survived any local edits, and that `./stack.sh config` still shows it.
 

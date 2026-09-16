@@ -156,6 +156,11 @@ $schemas = @(Invoke-ProwlarrApi -Method GET -Uri "$indexerUri/schema" -ApiKey $p
 $existingIndexers = @(Invoke-ProwlarrApi -Method GET -Uri $indexerUri -ApiKey $prowlarrApiKey)
 
 foreach ($item in @($config.indexers)) {
+    if ($null -ne $item.enable -and -not [bool]$item.enable) {
+        Write-Host "Skipping disabled indexer entry: $($item.schemaName)"
+        continue
+    }
+
     $schemaName = [string]$item.schemaName
     if (-not $schemaName) {
         throw 'Every indexer entry must include schemaName.'
