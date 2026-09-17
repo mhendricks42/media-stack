@@ -44,6 +44,7 @@ One base Compose file holds everything platform-neutral. Thin overlays add what 
 | Radarr | 7878 | Movies. Same, for films. |
 | Bazarr | 6767 | Subtitles, per language profile. |
 | Jellyfin | 8096 | Media server. Scans, transcodes, streams. |
+| ErsatzTV | 8409 | Pseudo-live TV channels and guide data from the local library. |
 | Seerr | 5055 | Request UI for the household. |
 | Tailscale | — | Remote access. Linux host node or optional Windows container node. |
 
@@ -63,6 +64,8 @@ Seerr is the merged successor to Overseerr and Jellyseerr. Readarr is deliberate
                          │
                      Jellyfin
                          │
+                    ErsatzTV
+                       │
               TVs, phones, browsers
 ```
 
@@ -72,7 +75,7 @@ Two network domains live on one host and never talk over the network the way you
 
 **The `medianet` bridge** contains everything else. Sonarr and Radarr prefer SABnzbd at `sabnzbd:8080` for Usenet downloads, and keep qBittorrent at `gluetun:8080` as the secondary torrent client. The arr apps never join the swarm, so they do not need the tunnel.
 
-**`/data`** is the handoff. SABnzbd writes to `/data/usenet`, qBittorrent writes to `/data/torrents`, Sonarr and Radarr import into `/data/media`, and Jellyfin reads the finished library. Coordination over the bridge, files over the filesystem.
+**`/data`** is the handoff. SABnzbd writes to `/data/usenet`, qBittorrent writes to `/data/torrents`, Sonarr and Radarr import into `/data/media`, Jellyfin reads the finished library, and ErsatzTV reads the same media tree to build pseudo-live channels. Coordination over the bridge, files over the filesystem.
 
 ## How the dual-target setup works
 
@@ -309,6 +312,7 @@ The container joining the tailnet does not automatically publish every Compose s
 docker compose exec tailscale tailscale serve --http=8989 http://sonarr:8989
 docker compose exec tailscale tailscale serve --http=8081 http://sabnzbd:8080
 docker compose exec tailscale tailscale serve --http=8096 http://jellyfin:8096
+docker compose exec tailscale tailscale serve --http=8409 http://ersatztv:8409
 docker compose exec tailscale tailscale serve status
 ```
 
@@ -406,9 +410,22 @@ For private indexer credentials, put environment references in `indexers.json` i
 
 **5. Jellyfin** (`:8096`). Add `/data/media/tv` and `/data/media/movies` as libraries. Then in Sonarr and Radarr, Settings → Connect → add Jellyfin so imports trigger an immediate scan.
 
-**6. Bazarr** last. Point it at Sonarr and Radarr, create a language profile, let it backfill.
+**6. ErsatzTV** (`:8409`). Add `/data/media` as a local media source, or connect ErsatzTV to Jellyfin if you prefer it to read Jellyfin libraries and metadata. Create collections or smart collections, then create channels and schedules. ErsatzTV exposes M3U tuner and XMLTV guide URLs; add those in Jellyfin under Dashboard → Live TV so the channels appear beside normal Jellyfin content.
 
-**7. Prove the pipeline with one title.** Add a single show, watch it go from grab to Jellyfin, then confirm the hardlink:
+Typical internal URLs look like this:
+
+```text
+ErsatzTV UI: http://ersatztv:8409
+Host UI: http://localhost:8409
+Jellyfin tuner URL: http://ersatztv:8409/iptv/channels.m3u
+Jellyfin guide URL: http://ersatztv:8409/iptv/xmltv.xml
+```
+
+Use ErsatzTV for lean-back channels: shuffled sitcom blocks, network-themed schedules, non-consecutive episodes, marathons, or always-running pseudo-cable channels.
+
+**7. Bazarr** last. Point it at Sonarr and Radarr, create a language profile, let it backfill.
+
+**8. Prove the pipeline with one title.** Add a single show, watch it go from grab to Jellyfin, then confirm the hardlink:
 
 ```bash
 df -h /data                                    # note usage
@@ -573,6 +590,8 @@ Back up before upgrading. `./stack.sh backup` or `.\stack.ps1 backup` stops the 
 **Everything works on the LAN but hangs over Tailscale.** Gluetun's firewall is dropping return traffic to tailnet clients. `FIREWALL_OUTBOUND_SUBNETS` must include `100.64.0.0/10` — it does in the shipped config, so check that your edited `.env` did not lose it.
 
 **SABnzbd cannot download from Usenet.** Bootstrap wires SABnzbd into Sonarr/Radarr, but you still need a Usenet provider configured in SABnzbd. Use SSL, usually port `563`, and the provider credentials from your Usenet account.
+
+**ErsatzTV opens but Jellyfin has no channels.** ErsatzTV creates channels, but Jellyfin does not discover them automatically. In Jellyfin, add an M3U tuner using `http://ersatztv:8409/iptv/channels.m3u`, then add XMLTV guide data from `http://ersatztv:8409/iptv/xmltv.xml` and refresh guide data.
 
 **`verify` reports matching IPs.** qBittorrent is not in Gluetun's namespace. Check that `network_mode: "service:gluetun"` survived any local edits, and that `./stack.sh config` still shows it.
 

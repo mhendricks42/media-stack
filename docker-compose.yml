@@ -162,6 +162,21 @@ services:
       - ${BIND_ADDR:?Set BIND_ADDR in .env}:8096:8096
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
+  ersatztv:
+    image: jasongdove/ersatztv:latest
+    networks:
+      - medianet
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - TZ=${TZ:?Set TZ in .env}
+    volumes:
+      - ./config/ersatztv:/root/.local/share/ersatztv
+      - ${DATA_ROOT:?Set DATA_ROOT in .env}/media:/data/media:ro
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:8409:8409
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
+
   seerr:
     image: ghcr.io/seerr-team/seerr:latest
     init: true

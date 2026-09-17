@@ -126,7 +126,7 @@ doctor() {
 
   if docker compose config >/dev/null 2>&1; then write_check "compose renders" 0; else write_check "compose renders" 1; fi
 
-  for service in gluetun sabnzbd sonarr radarr prowlarr; do
+  for service in gluetun sabnzbd sonarr radarr prowlarr ersatztv; do
     container_id="$(docker compose ps -q "$service")"
     if [[ -n "$container_id" ]]; then write_check "$service container" 0; else write_check "$service container" 1; fi
   done
@@ -142,7 +142,7 @@ doctor() {
     if [[ "$gluetun_health" == "healthy" ]]; then write_check "gluetun health" 0 "$gluetun_health"; else write_check "gluetun health" 1 "$gluetun_health"; fi
   fi
 
-  for endpoint in http://localhost:8081 http://localhost:9696 http://localhost:8989 http://localhost:7878; do
+  for endpoint in http://localhost:8081 http://localhost:9696 http://localhost:8989 http://localhost:7878 http://localhost:8409; do
     if curl -fsSL --max-time 5 "$endpoint" >/dev/null 2>&1; then write_check "reachable $endpoint" 0; else write_check "reachable $endpoint" 1; fi
   done
 

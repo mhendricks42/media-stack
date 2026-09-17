@@ -125,7 +125,7 @@ function Invoke-Doctor {
         docker compose config *> $null
         Write-Check 'compose renders' ($LASTEXITCODE -eq 0)
 
-        $services = @('gluetun', 'sabnzbd', 'sonarr', 'radarr', 'prowlarr')
+        $services = @('gluetun', 'sabnzbd', 'sonarr', 'radarr', 'prowlarr', 'ersatztv')
         foreach ($service in $services) {
             $containerId = (docker compose ps -q $service).Trim()
             Write-Check "$service container" ([bool]$containerId)
@@ -146,7 +146,7 @@ function Invoke-Doctor {
             Write-Check 'gluetun health' ($gluetunHealth -eq 'healthy') $gluetunHealth
         }
 
-        foreach ($endpoint in @('http://localhost:8081', 'http://localhost:9696', 'http://localhost:8989', 'http://localhost:7878')) {
+        foreach ($endpoint in @('http://localhost:8081', 'http://localhost:9696', 'http://localhost:8989', 'http://localhost:7878', 'http://localhost:8409')) {
             try {
                 Invoke-WebRequest -Uri $endpoint -UseBasicParsing -TimeoutSec 5 | Out-Null
                 Write-Check "reachable $endpoint" $true
