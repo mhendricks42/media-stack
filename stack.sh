@@ -53,11 +53,27 @@ check_docker_engine() {
     exit 1
   fi
 
-  if ! docker info >/dev/null 2>&1; then
-    echo "Docker engine is not reachable. Start Docker, wait until it is running, then run this command again."
-    echo "On Docker Desktop/WSL, try: wsl --shutdown; then reopen Docker Desktop."
-    exit 1
+  if docker info >/dev/null 2>&1; then
+    return 0
   fi
+
+  if [[ -z "${MEDIA_STACK_NO_DOCKER_AUTOSTART:-}" ]] && command -v systemctl >/dev/null 2>&1; then
+    echo "Docker engine is not reachable; trying to start the docker service..."
+    systemctl start docker >/dev/null 2>&1 || sudo systemctl start docker >/dev/null 2>&1 || true
+  fi
+
+  echo "Waiting for the Docker engine to become ready..."
+  for _ in $(seq 1 60); do
+    if docker info >/dev/null 2>&1; then
+      echo "Docker engine is ready."
+      return 0
+    fi
+    sleep 3
+  done
+
+  echo "Docker engine is not reachable. Start Docker, wait until it is running, then run this command again."
+  echo "On Docker Desktop/WSL, try: wsl --shutdown; then reopen Docker Desktop."
+  exit 1
 }
 
 get_env_file_value() {

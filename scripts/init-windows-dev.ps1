@@ -119,7 +119,7 @@ Set-DotEnvValue '.env' 'TS_HOSTNAME' 'media-dev-windows'
 
 Write-Host 'Updated .env for Windows development.'
 
-& docker.exe info --format '{{.ServerVersion}}' *> $null
+& docker.exe version --format '{{.Server.Version}}' *> $null
 if ($LASTEXITCODE -ne 0) {
     throw 'Docker engine is not reachable. Start Docker Desktop and wait until it says Running.'
 }

@@ -163,25 +163,83 @@ function Invoke-Doctor {
     }
 }
 
+function Test-DockerEngineReady {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & docker version --format '{{.Server.Version}}' *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
+function Get-DockerDesktopPath {
+    $candidates = @(
+        (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Docker\Docker\Docker Desktop.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Docker\Docker Desktop.exe')
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    }
+
+    return ''
+}
+
+function Start-DockerDesktop {
+    if (Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue) { return $true }
+
+    $dockerDesktop = Get-DockerDesktopPath
+    if (-not $dockerDesktop) { return $false }
+
+    Write-Host 'Starting Docker Desktop...'
+    Start-Process -FilePath $dockerDesktop | Out-Null
+    return $true
+}
+
+function Wait-DockerEngine {
+    param([int]$TimeoutSeconds = 300)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastNotice = Get-Date
+    while ((Get-Date) -lt $deadline) {
+        if (Test-DockerEngineReady) { return $true }
+        if (((Get-Date) - $lastNotice).TotalSeconds -ge 30) {
+            $remaining = [int]($deadline - (Get-Date)).TotalSeconds
+            Write-Host "  still waiting for Docker... (${remaining}s left)"
+            $lastNotice = Get-Date
+        }
+        Start-Sleep -Seconds 3
+    }
+
+    return Test-DockerEngineReady
+}
+
 function Test-DockerEngine {
     $docker = Get-Command docker -ErrorAction SilentlyContinue
     if (-not $docker) {
         throw 'Docker CLI was not found. Install Docker Desktop and reopen this terminal.'
     }
 
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        & docker info *> $null
-        $exitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $previousErrorActionPreference
+    if (Test-DockerEngineReady) { return }
+
+    if ($env:MEDIA_STACK_NO_DOCKER_AUTOSTART) {
+        throw 'Docker engine is not reachable and auto-start is disabled by MEDIA_STACK_NO_DOCKER_AUTOSTART. Start Docker Desktop, then run this command again.'
     }
 
-    if ($exitCode -ne 0) {
-        throw 'Docker engine is not reachable. Start Docker Desktop, wait until it says Running, then run this command again. If it still fails, run: wsl --shutdown; then reopen Docker Desktop.'
+    if (-not (Start-DockerDesktop)) {
+        throw 'Docker engine is not reachable and Docker Desktop was not found. Install or start Docker Desktop, then run this command again.'
     }
+
+    Write-Host 'Waiting for the Docker engine to become ready...'
+    if (-not (Wait-DockerEngine)) {
+        throw 'Docker Desktop was started but the engine did not become ready in time. Check Docker Desktop, or run: wsl --shutdown; then reopen Docker Desktop.'
+    }
+
+    Write-Host 'Docker engine is ready.'
 }
 
 if (-not $Command) {
