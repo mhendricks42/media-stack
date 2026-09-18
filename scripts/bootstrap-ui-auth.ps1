@@ -340,6 +340,10 @@ Set-ArrFormsAuthentication -ServiceName 'Radarr' -BaseUrl 'http://localhost:7878
 Set-ArrFormsAuthentication -ServiceName 'Prowlarr' -BaseUrl 'http://localhost:9696' -ApiKey $prowlarrApiKey -Username $ProwlarrUsername -Password $ProwlarrPassword -ApiVersion 'v1'
 Set-BazarrFormsAuthentication
 $jellyfinSession = Ensure-JellyfinAdmin
+& "$PSScriptRoot\bootstrap-jellyfin.ps1" -JellyfinUsername $JellyfinUsername -JellyfinPassword $JellyfinPassword
+if ($LASTEXITCODE -ne 0) {
+    throw 'Jellyfin baseline bootstrap failed.'
+}
 Initialize-SeerrWithJellyfin -JellyfinSession $jellyfinSession
 
 Write-Host 'UI authentication bootstrap complete.'

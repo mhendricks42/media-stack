@@ -346,9 +346,9 @@ Keep that PowerShell window open after `.\stack.ps1 env`; the secrets live only 
 
 Order matters — doing it in this sequence avoids re-entering things.
 
-**1. Run bootstrap after first startup.** Run `up` once before `bootstrap`; the apps need to create their `config/` files and API keys first. Bootstrap then configures UI logins, SABnzbd paths and provider servers, qBittorrent paths/seeding limits, Prowlarr app links, Sonarr episode naming and media management, Sonarr/Radarr download clients, and root folders.
+**1. Run bootstrap after first startup.** Run `up` once before `bootstrap`; the apps need to create their `config/` files and API keys first. Bootstrap then configures UI logins, SABnzbd paths and provider servers, qBittorrent paths/seeding limits, Prowlarr app links, Sonarr episode naming and media management, Sonarr/Radarr download clients, Jellyfin server settings, and root folders.
 
-On a fresh installation, bootstrap configures forms authentication for qBittorrent, SABnzbd, Sonarr, Radarr, Prowlarr, and Bazarr. It initializes the Jellyfin administrator from `JELLYFIN_USER` / `JELLYFIN_PASS`, then configures Seerr from that Jellyfin administrator using `SEERR_EMAIL`. Passwords are only read from runtime environment variables; qBittorrent uses a salted PBKDF2 hash and Bazarr uses its documented MD5 password hash in their local configuration. No temporary password or manual Web UI configuration is needed. Passwords must be at least six characters long.
+On a fresh installation, bootstrap configures forms authentication for qBittorrent, SABnzbd, Sonarr, Radarr, Prowlarr, and Bazarr. It initializes the Jellyfin administrator from `JELLYFIN_USER` / `JELLYFIN_PASS`, applies the Jellyfin baseline, then configures Seerr from that Jellyfin administrator using `SEERR_EMAIL` and verifies Seerr's API key. Passwords are only read from runtime environment variables; qBittorrent uses a salted PBKDF2 hash and Bazarr uses its documented MD5 password hash in their local configuration. No temporary password or manual Web UI configuration is needed. Passwords must be at least six characters long.
 
 ```powershell
 .\stack.ps1 env
@@ -377,6 +377,8 @@ Torrent path: /data/torrents
 Radarr download clients are baselined too: SABnzbd uses `movies`, priority `1`, completed download handling on, and default movie priorities; qBittorrent uses `movies`, post-import category `movies-imported`, priority `2`, completed download handling off, and default movie priorities.
 
 Sonarr media management is also baselined from the current dev config: episode renaming is enabled, hardlinks are enabled, proper/repack upgrades are preferred, season folders are `Season {season:00}`, specials go under `Specials`, and anime names include series year, season/episode, absolute number, custom formats, quality, media info, and release group.
+
+Jellyfin is baselined during bootstrap too: the server name defaults to `Media Stack` unless `JELLYFIN_SERVER_NAME` is set, `Movies` points at `/data/media/movies`, `Shows` points at `/data/media/tv`, Live TV gets the ErsatzTV M3U tuner `http://ersatztv:8409/iptv/channels.m3u`, and guide data gets the ErsatzTV XMLTV feed `http://ersatztv:8409/iptv/xmltv.xml`.
 
 For more than two SABnzbd servers, inject `SAB_SERVERS_JSON` from your secret manager instead of using the interactive helper. It accepts either an array or an object with a `servers` array. Each server needs `host`, `username`, and `password`; optional fields include `name`, `displayName`, `port`, `connections`, `ssl`, `enable`, `priority`, `optional`, `required`, `retention`, and `sslVerify`.
 
@@ -436,9 +438,9 @@ The negative scores on Anime Raws and Anime LQ Groups are what actually keeps un
 
 [Buildarr](https://github.com/buildarr/buildarr) covers the same ground if you want indexers and naming schemes declarative too.
 
-**5. Jellyfin** (`:8096`). Add `/data/media/tv` and `/data/media/movies` as libraries. Then in Sonarr and Radarr, Settings → Connect → add Jellyfin so imports trigger an immediate scan.
+**5. Jellyfin** (`:8096`). Bootstrap creates the `Movies` and `Shows` libraries, sets the server name, and adds ErsatzTV as an M3U tuner with XMLTV guide data. Then in Sonarr and Radarr, Settings → Connect → add Jellyfin so imports trigger an immediate scan.
 
-**6. ErsatzTV** (`:8409`). Add `/data/media` as a local media source, or connect ErsatzTV to Jellyfin if you prefer it to read Jellyfin libraries and metadata. Create collections or smart collections, then create channels and schedules. ErsatzTV exposes M3U tuner and XMLTV guide URLs; add those in Jellyfin under Dashboard → Live TV so the channels appear beside normal Jellyfin content.
+**6. ErsatzTV** (`:8409`). Add `/data/media` as a local media source, or connect ErsatzTV to Jellyfin if you prefer it to read Jellyfin libraries and metadata. Create collections or smart collections, then create channels and schedules. ErsatzTV exposes M3U tuner and XMLTV guide URLs, and bootstrap adds those URLs to Jellyfin Live TV.
 
 Typical internal URLs look like this:
 

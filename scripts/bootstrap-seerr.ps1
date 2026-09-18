@@ -89,6 +89,56 @@ function Find-ProfileId {
     return $Profiles[0].id
 }
 
+function Set-JsonProperty {
+    param(
+        [object]$Object,
+        [string]$Name,
+        [object]$Value
+    )
+
+    if ($Object.PSObject.Properties[$Name]) {
+        $Object.PSObject.Properties[$Name].Value = $Value
+    }
+    else {
+        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+    }
+}
+
+function New-SeerrApiKey {
+    $bytes = New-Object byte[] 48
+    $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $random.GetBytes($bytes)
+        return [Convert]::ToBase64String($bytes)
+    }
+    finally {
+        $random.Dispose()
+    }
+}
+
+function Ensure-SeerrApiKey {
+    param([string]$SettingsPath)
+
+    if (-not (Test-Path $SettingsPath)) {
+        throw "Missing Seerr settings file: $SettingsPath"
+    }
+
+    $settings = Get-Content $SettingsPath -Raw | ConvertFrom-Json
+    if (-not $settings.PSObject.Properties['main'] -or $null -eq $settings.main) {
+        Set-JsonProperty -Object $settings -Name 'main' -Value ([pscustomobject]@{})
+    }
+
+    if ($settings.main.PSObject.Properties['apiKey'] -and -not [string]::IsNullOrWhiteSpace([string]$settings.main.apiKey)) {
+        Write-Host 'Seerr API key verified.'
+        return
+    }
+
+    Set-JsonProperty -Object $settings.main -Name 'apiKey' -Value (New-SeerrApiKey)
+    Copy-Item $SettingsPath "$SettingsPath.bak" -Force
+    $settings | ConvertTo-Json -Depth 30 | Set-Content $SettingsPath
+    Write-Host "Seerr API key generated. Backup: $SettingsPath.bak"
+}
+
 function Update-SeerrSettings {
     param(
         [string]$SettingsPath,
@@ -137,6 +187,7 @@ function Update-SeerrSettings {
 Write-Host 'Configuring Seerr with Sonarr and Radarr...'
 
 Wait-SeerrHealthy
+Ensure-SeerrApiKey -SettingsPath '.\config\seerr\settings.json'
 
 $sonarrApiKey = Get-ApiKeyFromConfig '.\config\sonarr\config.xml'
 $radarrApiKey = Get-ApiKeyFromConfig '.\config\radarr\config.xml'
