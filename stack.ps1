@@ -23,6 +23,7 @@ function Show-Usage {
     Write-Host "  .\stack.ps1 env [--include-tailscale]"
     Write-Host "  .\stack.ps1 bootstrap"
     Write-Host "  .\stack.ps1 import-indexers [path] [--dry-run]"
+    Write-Host "  .\stack.ps1 sync-profiles [--preview]"
     Write-Host "  .\stack.ps1 doctor"
     Write-Host "  .\stack.ps1 backup"
     Write-Host "  .\stack.ps1 logs <service>"
@@ -77,6 +78,65 @@ function Test-SecretEnvironment {
     }
 }
 
+function Get-ArrApiKey {
+    param([string]$Path, [string]$AppName)
+
+    if (-not (Test-Path $Path)) {
+        throw "Missing $AppName config: $Path. Start the stack once with .\stack.ps1 up before syncing profiles."
+    }
+
+    $apiKey = [string]([xml](Get-Content $Path)).Config.ApiKey
+    if (-not $apiKey) {
+        throw "No ApiKey found in $Path."
+    }
+
+    return $apiKey
+}
+
+function Invoke-Recyclarr {
+    param([switch]$Preview)
+
+    Test-DockerEngine
+
+    New-Item -ItemType Directory -Force -Path 'config\recyclarr' | Out-Null
+    $configFile = 'config\recyclarr\recyclarr.yml'
+    if (-not (Test-Path $configFile)) {
+        if (-not (Test-Path 'recyclarr.example.yml')) {
+            throw 'Missing recyclarr.example.yml and config\recyclarr\recyclarr.yml. Restore one of them, then run sync-profiles again.'
+        }
+        Copy-Item 'recyclarr.example.yml' $configFile
+        Write-Host "Created $configFile from recyclarr.example.yml. Edit it to change which TRaSH templates are applied."
+    }
+
+    $env:SONARR_API_KEY = Get-ArrApiKey 'config\sonarr\config.xml' 'Sonarr'
+    $env:RADARR_API_KEY = Get-ArrApiKey 'config\radarr\config.xml' 'Radarr'
+
+    # Compose interpolates the whole file even for a single service, and
+    # Gluetun requires VPN credentials. Recyclarr never touches Gluetun, so
+    # placeholders are enough to satisfy interpolation.
+    $hadNordUser = [bool]$env:NORD_USER
+    $hadNordPass = [bool]$env:NORD_PASS
+    $previousNordUser = $env:NORD_USER
+    $previousNordPass = $env:NORD_PASS
+    if (-not $hadNordUser) { $env:NORD_USER = '__recyclarr_placeholder__' }
+    if (-not $hadNordPass) { $env:NORD_PASS = '__recyclarr_placeholder__' }
+
+    try {
+        if ($Preview) {
+            docker compose run --rm recyclarr sync --preview
+        }
+        else {
+            docker compose run --rm recyclarr sync
+        }
+    }
+    finally {
+        Remove-Item Env:SONARR_API_KEY -ErrorAction SilentlyContinue
+        Remove-Item Env:RADARR_API_KEY -ErrorAction SilentlyContinue
+        if ($hadNordUser) { $env:NORD_USER = $previousNordUser } else { Remove-Item Env:NORD_USER -ErrorAction SilentlyContinue }
+        if ($hadNordPass) { $env:NORD_PASS = $previousNordPass } else { Remove-Item Env:NORD_PASS -ErrorAction SilentlyContinue }
+    }
+}
+
 function Get-PublicIp {
     param([string[]]$Uris)
 
@@ -121,6 +181,8 @@ function Invoke-Doctor {
     try {
         $dataRoot = Get-EnvFileValue 'DATA_ROOT'
         Write-Check 'DATA_ROOT configured' ([bool]$dataRoot) $dataRoot
+        $recyclarrConfigured = Test-Path 'config\recyclarr\recyclarr.yml'
+        Write-Check 'recyclarr config' $recyclarrConfigured $(if ($recyclarrConfigured) { '' } else { 'run sync-profiles to create it' })
 
         docker compose config *> $null
         Write-Check 'compose renders' ($LASTEXITCODE -eq 0)
@@ -315,6 +377,15 @@ switch ($Command) {
             & .\scripts\import-prowlarr-indexers.ps1
         }
     }
+    'sync-profiles' {
+        if ($Arg -and $Arg -ne '--preview') { throw "Unknown sync-profiles option: $Arg" }
+        if ($Arg -eq '--preview') {
+            Invoke-Recyclarr -Preview
+        }
+        else {
+            Invoke-Recyclarr
+        }
+    }
     'doctor' {
         Invoke-Doctor
     }
@@ -350,7 +421,7 @@ switch ($Command) {
         $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         New-Item -ItemType Directory -Force -Path 'backups' | Out-Null
         docker compose stop
-        tar -czf "backups/media-stack-$timestamp.tgz" config .env docker-compose.yml compose env indexers.example.json scripts stack.ps1 stack.sh readme.md
+        tar -czf "backups/media-stack-$timestamp.tgz" config .env docker-compose.yml compose env indexers.example.json recyclarr.example.yml scripts stack.ps1 stack.sh readme.md
         docker compose up -d
         Write-Host "Backup written to backups/media-stack-$timestamp.tgz"
         Write-Host 'Treat this archive as sensitive: config/ can contain API keys and session tokens.'

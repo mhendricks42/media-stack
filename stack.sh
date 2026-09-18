@@ -10,6 +10,7 @@ Usage:
   source ./scripts/set-env.sh [--include-tailscale]
   ./stack.sh bootstrap
   ./stack.sh import-indexers [path] [--dry-run]
+  ./stack.sh sync-profiles [--preview]
   ./stack.sh doctor
   ./stack.sh logs <service>
   ./stack.sh restart <service>
@@ -109,6 +110,57 @@ write_check() {
   fi
 }
 
+get_arr_api_key() {
+  local path="$1"
+  local app_name="$2"
+
+  if [[ ! -f "$path" ]]; then
+    echo "Missing $app_name config: $path. Start the stack once with ./stack.sh up before syncing profiles." >&2
+    exit 1
+  fi
+
+  local api_key
+  api_key="$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' "$path" | head -n 1)"
+  if [[ -z "$api_key" ]]; then
+    echo "No ApiKey found in $path." >&2
+    exit 1
+  fi
+
+  printf '%s' "$api_key"
+}
+
+run_recyclarr() {
+  local preview="${1:-}"
+
+  check_docker_engine
+
+  mkdir -p config/recyclarr
+  if [[ ! -f config/recyclarr/recyclarr.yml ]]; then
+    if [[ ! -f recyclarr.example.yml ]]; then
+      echo "Missing recyclarr.example.yml and config/recyclarr/recyclarr.yml. Restore one of them, then run sync-profiles again."
+      exit 1
+    fi
+    cp recyclarr.example.yml config/recyclarr/recyclarr.yml
+    echo "Created config/recyclarr/recyclarr.yml from recyclarr.example.yml. Edit it to change which TRaSH templates are applied."
+  fi
+
+  SONARR_API_KEY="$(get_arr_api_key config/sonarr/config.xml Sonarr)"
+  RADARR_API_KEY="$(get_arr_api_key config/radarr/config.xml Radarr)"
+  export SONARR_API_KEY RADARR_API_KEY
+
+  # Compose interpolates the whole file even for a single service, and Gluetun
+  # requires VPN credentials. Recyclarr never touches Gluetun, so placeholders
+  # are enough to satisfy interpolation.
+  export NORD_USER="${NORD_USER:-__recyclarr_placeholder__}"
+  export NORD_PASS="${NORD_PASS:-__recyclarr_placeholder__}"
+
+  if [[ "$preview" == "--preview" ]]; then
+    docker compose run --rm recyclarr sync --preview
+  else
+    docker compose run --rm recyclarr sync
+  fi
+}
+
 public_ip() {
   curl -fsSL --max-time 10 https://ipinfo.io/ip 2>/dev/null || curl -fsSL --max-time 10 https://api.ipify.org
 }
@@ -139,6 +191,8 @@ doctor() {
 
   data_root="$(get_env_file_value DATA_ROOT)"
   if [[ -n "$data_root" ]]; then write_check "DATA_ROOT configured" 0 "$data_root"; else write_check "DATA_ROOT configured" 1; fi
+
+  if [[ -f config/recyclarr/recyclarr.yml ]]; then write_check "recyclarr config" 0; else write_check "recyclarr config" 1 "run sync-profiles to create it"; fi
 
   if docker compose config >/dev/null 2>&1; then write_check "compose renders" 0; else write_check "compose renders" 1; fi
 
@@ -233,6 +287,13 @@ case "$cmd" in
       pwsh ./scripts/import-prowlarr-indexers.ps1
     fi
     ;;
+  sync-profiles)
+    if [[ -n "$arg" && "$arg" != "--preview" ]]; then
+      echo "Unknown sync-profiles option: $arg"
+      exit 1
+    fi
+    run_recyclarr "$arg"
+    ;;
   doctor)
     doctor
     ;;
@@ -293,7 +354,7 @@ case "$cmd" in
     ts="$(date +%Y%m%d-%H%M%S)"
     mkdir -p backups
     docker compose stop
-    tar -czf "backups/media-stack-$ts.tgz" config .env docker-compose.yml compose env
+    tar -czf "backups/media-stack-$ts.tgz" config .env docker-compose.yml compose env recyclarr.example.yml
     docker compose up -d
     echo "Backup written to backups/media-stack-$ts.tgz"
     echo "Treat this archive as sensitive: config/ can contain API keys and session tokens."

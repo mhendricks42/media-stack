@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=https://schemas.recyclarr.dev/v8/config-schema.json
+########################################################################
+# Recyclarr — declarative TRaSH Guides sync for Sonarr and Radarr
+#
+# Copy this file to config/recyclarr/recyclarr.yml and edit it, or just run
+#   .\stack.ps1 sync-profiles      /  ./stack.sh sync-profiles
+# which copies it into place on first run.
+#
+# API keys are injected as environment variables by the stack wrappers, which
+# read them from config/sonarr/config.xml and config/radarr/config.xml.
+# Never write API keys into this file.
+#
+# Preview before applying:
+#   .\stack.ps1 sync-profiles --preview
+#
+# Each profile's required custom formats and TRaSH scores are pulled in
+# automatically. To add optional format groups or skip default ones, see
+# https://recyclarr.dev/guide/cf-groups/ and the upstream templates at
+# https://github.com/recyclarr/config-templates
+########################################################################
+
+sonarr:
+  main:
+    base_url: http://sonarr:8989
+    api_key: !env_var SONARR_API_KEY
+
+    # Sonarr has one set of quality definitions per instance, so a mixed
+    # series-and-anime library has to pick one. `series` is the safe default.
+    # Switch to `anime` only if this Sonarr is anime-only.
+    quality_definition:
+      type: series
+
+    # The anime profile brings in the Anime BD and Web tiers, Anime Raws,
+    # Anime LQ Groups, and Uncensored with TRaSH's intended scores. The heavy
+    # negative scores on Raws and LQ Groups are what keep unsubbed and
+    # low-quality anime releases out of the library.
+    quality_profiles:
+      - trash_id: 72dae194fc92bf828f32cde7744e51a1 # WEB-1080p
+        reset_unmatched_scores:
+          enabled: true
+      - trash_id: 20e0fc959f1f1704bed501f23bdae76f # [Anime] Remux-1080p
+        reset_unmatched_scores:
+          enabled: true
+        qualities:
+          - name: Bluray 1080p
+            enabled: false
+          - name: Bluray-720p
+            enabled: false
+          - name: Bluray-480p
+            enabled: false
+
+radarr:
+  movies:
+    base_url: http://radarr:7878
+    api_key: !env_var RADARR_API_KEY
+
+    quality_definition:
+      type: movie
+
+    quality_profiles:
+      - trash_id: d1d67249d3890e49bc12e275d989a7e9 # HD Bluray + WEB
+        reset_unmatched_scores:
+          enabled: true
+        qualities:
+          - name: Bluray-1080p
+            enabled: false
+          - name: Bluray-720p
+            enabled: false
+          - name: Bluray-480p
+            enabled: false

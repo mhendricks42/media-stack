@@ -177,6 +177,29 @@ services:
       - ${BIND_ADDR:?Set BIND_ADDR in .env}:8409:8409
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
+  # One-shot TRaSH Guides sync. Not started by `up`; it is run on demand by
+  # `stack.ps1 sync-profiles` / `stack.sh sync-profiles`, which injects the
+  # Sonarr and Radarr API keys read from config/.
+  #
+  # Recyclarr publishes no `latest` tag on purpose, because a major version
+  # bump can require config changes. Pin the major version deliberately.
+  recyclarr:
+    image: ghcr.io/recyclarr/recyclarr:8
+    profiles:
+      - recyclarr
+    networks:
+      - medianet
+    security_opt:
+      - no-new-privileges:true
+    user: ${PUID:?Set PUID in .env}:${PGID:?Set PGID in .env}
+    environment:
+      - TZ=${TZ:?Set TZ in .env}
+      - SONARR_API_KEY=${SONARR_API_KEY:-}
+      - RADARR_API_KEY=${RADARR_API_KEY:-}
+    volumes:
+      - ./config/recyclarr:/config
+    restart: "no"
+
   seerr:
     image: ghcr.io/seerr-team/seerr:latest
     init: true

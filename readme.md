@@ -43,6 +43,7 @@ One base Compose file holds everything platform-neutral. Thin overlays add what 
 | Sonarr | 8989 | TV. Monitors series, grabs episodes, renames and upgrades. |
 | Radarr | 7878 | Movies. Same, for films. |
 | Bazarr | 6767 | Subtitles, per language profile. |
+| Recyclarr | — | On-demand TRaSH Guides sync for Sonarr and Radarr quality profiles and custom formats. |
 | Jellyfin | 8096 | Media server. Scans, transcodes, streams. |
 | ErsatzTV | 8409 | Pseudo-live TV channels and guide data from the local library. |
 | Seerr | 5055 | Request UI for the household. |
@@ -144,6 +145,7 @@ $env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/gpu-nvidia.yml
 │   ├── set-env.ps1            # interactive Windows session env helper
 │   └── set-env.sh             # interactive Bash session env helper
 ├── config/                     # gitignored — app state lives here
+├── recyclarr.example.yml       # TRaSH Guides templates to sync
 ├── stack.sh                    # wrapper (bash)
 ├── stack.ps1                   # wrapper (PowerShell)
 └── .gitignore
@@ -406,7 +408,25 @@ For private indexer credentials, put environment references in `indexers.json` i
 
 **3. Confirm root folders and hardlinks.** Bootstrap creates Sonarr root folder `/data/media/tv` and Radarr root folder `/data/media/movies`. Under Media Management, confirm **Use Hardlinks instead of Copy** is enabled.
 
-**4. Quality profiles.** Take the defaults on day one. Tune later with [Recyclarr](https://github.com/recyclarr/recyclarr), which syncs [TRaSH Guides](https://trash-guides.info/) profiles automatically — hand-tuning custom formats is a rabbit hole with a well-maintained escape.
+**4. Quality profiles.** Sync them from [TRaSH Guides](https://trash-guides.info/) instead of hand-tuning custom formats:
+
+```powershell
+.\stack.ps1 sync-profiles --preview
+.\stack.ps1 sync-profiles
+```
+
+```bash
+./stack.sh sync-profiles --preview
+./stack.sh sync-profiles
+```
+
+The first run copies `recyclarr.example.yml` to `config/recyclarr/recyclarr.yml`, then applies it. The shipped file syncs a 1080p WEB profile plus the full anime set — every Anime BD and Web tier, Anime Raws, Anime LQ Groups, and Uncensored — with TRaSH's intended scores. Edit `config/recyclarr/recyclarr.yml` to change which templates apply, then re-run.
+
+The wrappers read the Sonarr and Radarr API keys out of `config/` and inject them as environment variables, so no key is ever written into the Recyclarr config.
+
+The negative scores on Anime Raws and Anime LQ Groups are what actually keeps unsubbed and low-quality anime releases out of the library; the profile's minimum format score rejects them rather than merely depranking them. Recyclarr owns the formats and profiles it manages, so anything you created by hand under the same names is overwritten — run `--preview` first.
+
+[Buildarr](https://github.com/buildarr/buildarr) covers the same ground if you want indexers and naming schemes declarative too.
 
 **5. Jellyfin** (`:8096`). Add `/data/media/tv` and `/data/media/movies` as libraries. Then in Sonarr and Radarr, Settings → Connect → add Jellyfin so imports trigger an immediate scan.
 
@@ -450,6 +470,7 @@ source ./scripts/set-env.sh   # prompt for session env vars
 ./stack.sh setup-data         # create /data/usenet, /data/torrents, and media folders
 ./stack.sh bootstrap          # wire Prowlarr, Sonarr, Radarr, SABnzbd, and qBittorrent
 ./stack.sh import-indexers    # import local indexers.json into Prowlarr
+./stack.sh sync-profiles      # sync TRaSH quality profiles and custom formats
 ./stack.sh doctor             # check Docker, data paths, hardlinks, APIs, and Gluetun
 ./stack.sh logs sonarr        # follow one service
 ./stack.sh restart gluetun    # restart one service
@@ -530,7 +551,7 @@ The whole point of the dual target is testing changes safely. What is safe to mo
 5. On prod: `git pull`, `./stack.sh config` to re-check under the Linux overlay, `./stack.sh backup`, then `./stack.sh up`.
 6. `./stack.sh verify` if anything touched Gluetun.
 
-Application-level settings — quality profiles, indexers, naming schemes — are better managed declaratively with [Recyclarr](https://github.com/recyclarr/recyclarr) or [Buildarr](https://github.com/buildarr/buildarr) than by copying databases. That way they are in the repo too, and dev/prod drift stops being a category of problem.
+Application-level settings — quality profiles, indexers, naming schemes — are better managed declaratively than by copying databases. `recyclarr.example.yml` and `indexers.example.json` are in the repo for exactly that reason: promote the file, run `./stack.sh sync-profiles` or `./stack.sh import-indexers` on prod, and dev/prod drift stops being a category of problem. [Buildarr](https://github.com/buildarr/buildarr) extends the same idea further if you want it.
 
 ## Security model
 
@@ -550,7 +571,7 @@ Worth being precise about scope: Gluetun controls where qBittorrent's traffic *e
 
 - `no-new-privileges:true` on every service
 - Jellyfin's media mount is read-only
-- Images currently use `latest` tags by default
+- Images currently use `latest` tags by default, except Recyclarr, which publishes no `latest` tag and is pinned to a major version
 - No Docker socket mounted anywhere
 - Containers run as `PUID`/`PGID`, not root
 - Dev binds to loopback only
