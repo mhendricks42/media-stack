@@ -83,6 +83,22 @@ read_secret QBIT_PASS "qBittorrent Web UI password" 6
 read_value SABNZBD_USER "SABnzbd Web UI username" "admin"
 read_secret SABNZBD_PASS "SABnzbd Web UI password" 6
 
+read_value SAB_SERVER_HOST "Primary Usenet server host (blank to skip)" "" 0
+if [[ -n "${SAB_SERVER_HOST:-}" ]]; then
+  read_value SAB_SERVER_USER "Primary Usenet server username"
+  read_secret SAB_SERVER_PASS "Primary Usenet server password"
+  read_value SAB_SERVER_PORT "Primary Usenet server port" "563"
+  read_value SAB_SERVER_CONNECTIONS "Primary Usenet server connections" "20"
+fi
+
+read_value SAB_BACKUP_SERVER_HOST "Backup/block Usenet server host (blank to skip)" "" 0
+if [[ -n "${SAB_BACKUP_SERVER_HOST:-}" ]]; then
+  read_value SAB_BACKUP_SERVER_USER "Backup/block Usenet server username"
+  read_secret SAB_BACKUP_SERVER_PASS "Backup/block Usenet server password"
+  read_value SAB_BACKUP_SERVER_PORT "Backup/block Usenet server port" "563"
+  read_value SAB_BACKUP_SERVER_CONNECTIONS "Backup/block Usenet server connections" "10"
+fi
+
 read_value SONARR_USER "Sonarr UI username" "admin"
 read_secret SONARR_PASS "Sonarr UI password" 6
 

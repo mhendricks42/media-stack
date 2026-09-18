@@ -74,6 +74,24 @@ Set-SessionEnv 'QBIT_PASS' (Read-SecretValue 'QBIT_PASS' 'qBittorrent Web UI pas
 Set-SessionEnv 'SABNZBD_USER' (Read-Value 'SABNZBD_USER' 'SABnzbd Web UI username' 'admin' -Required)
 Set-SessionEnv 'SABNZBD_PASS' (Read-SecretValue 'SABNZBD_PASS' 'SABnzbd Web UI password' 6)
 
+$sabServerHost = Read-Value 'SAB_SERVER_HOST' 'Primary Usenet server host (blank to skip)' ''
+if ($sabServerHost) {
+    Set-SessionEnv 'SAB_SERVER_HOST' $sabServerHost
+    Set-SessionEnv 'SAB_SERVER_USER' (Read-Value 'SAB_SERVER_USER' 'Primary Usenet server username' '' -Required)
+    Set-SessionEnv 'SAB_SERVER_PASS' (Read-SecretValue 'SAB_SERVER_PASS' 'Primary Usenet server password')
+    Set-SessionEnv 'SAB_SERVER_PORT' (Read-Value 'SAB_SERVER_PORT' 'Primary Usenet server port' '563' -Required)
+    Set-SessionEnv 'SAB_SERVER_CONNECTIONS' (Read-Value 'SAB_SERVER_CONNECTIONS' 'Primary Usenet server connections' '20' -Required)
+}
+
+$sabBackupServerHost = Read-Value 'SAB_BACKUP_SERVER_HOST' 'Backup/block Usenet server host (blank to skip)' ''
+if ($sabBackupServerHost) {
+    Set-SessionEnv 'SAB_BACKUP_SERVER_HOST' $sabBackupServerHost
+    Set-SessionEnv 'SAB_BACKUP_SERVER_USER' (Read-Value 'SAB_BACKUP_SERVER_USER' 'Backup/block Usenet server username' '' -Required)
+    Set-SessionEnv 'SAB_BACKUP_SERVER_PASS' (Read-SecretValue 'SAB_BACKUP_SERVER_PASS' 'Backup/block Usenet server password')
+    Set-SessionEnv 'SAB_BACKUP_SERVER_PORT' (Read-Value 'SAB_BACKUP_SERVER_PORT' 'Backup/block Usenet server port' '563' -Required)
+    Set-SessionEnv 'SAB_BACKUP_SERVER_CONNECTIONS' (Read-Value 'SAB_BACKUP_SERVER_CONNECTIONS' 'Backup/block Usenet server connections' '10' -Required)
+}
+
 Set-SessionEnv 'SONARR_USER' (Read-Value 'SONARR_USER' 'Sonarr UI username' 'admin' -Required)
 Set-SessionEnv 'SONARR_PASS' (Read-SecretValue 'SONARR_PASS' 'Sonarr UI password' 6)
 

@@ -44,6 +44,18 @@ function Test-BootstrapEnvironment {
     if ($missing.Count -gt 0) {
         throw "Missing bootstrap environment variable(s): $($missing -join ', '). Run .\stack.ps1 env in this PowerShell session, then rerun bootstrap."
     }
+
+    foreach ($prefix in @('SAB_SERVER', 'SAB_BACKUP_SERVER')) {
+        $hostValue = [Environment]::GetEnvironmentVariable("${prefix}_HOST", 'Process')
+        $userValue = [Environment]::GetEnvironmentVariable("${prefix}_USER", 'Process')
+        if (-not $userValue) { $userValue = [Environment]::GetEnvironmentVariable("${prefix}_USERNAME", 'Process') }
+        $passValue = [Environment]::GetEnvironmentVariable("${prefix}_PASS", 'Process')
+        if (-not $passValue) { $passValue = [Environment]::GetEnvironmentVariable("${prefix}_PASSWORD", 'Process') }
+
+        if ($hostValue -and (-not $userValue -or -not $passValue)) {
+            throw "${prefix}_HOST is set, so ${prefix}_USER and ${prefix}_PASS are required."
+        }
+    }
 }
 
 function Get-ApiKeyFromConfig {
@@ -107,10 +119,40 @@ function Set-FieldValue {
 
     $field = @($Fields | Where-Object { $_.name -eq $Name } | Select-Object -First 1)
     if ($field.Count -eq 0) {
-        throw "The qBittorrent schema does not contain the '$Name' field."
+        throw "The download-client schema does not contain the '$Name' field."
     }
 
     Set-ObjectProperty -Object $field[0] -Name 'value' -Value $Value
+}
+
+function Set-FieldValueIfPresent {
+    param(
+        [object[]]$Fields,
+        [string]$Name,
+        [object]$Value
+    )
+
+    $field = @($Fields | Where-Object { $_.name -eq $Name } | Select-Object -First 1)
+    if ($field.Count -gt 0) {
+        Set-ObjectProperty -Object $field[0] -Name 'value' -Value $Value
+    }
+}
+
+function Set-DownloadClientPriorityFields {
+    param(
+        [object[]]$Fields,
+        [string]$CategoryField,
+        [int]$Priority
+    )
+
+    if ($CategoryField -eq 'tvCategory') {
+        Set-FieldValueIfPresent -Fields $Fields -Name 'recentTvPriority' -Value $Priority
+        Set-FieldValueIfPresent -Fields $Fields -Name 'olderTvPriority' -Value $Priority
+    }
+    elseif ($CategoryField -eq 'movieCategory') {
+        Set-FieldValueIfPresent -Fields $Fields -Name 'recentMoviePriority' -Value $Priority
+        Set-FieldValueIfPresent -Fields $Fields -Name 'olderMoviePriority' -Value $Priority
+    }
 }
 
 function Set-ObjectProperty {
@@ -258,6 +300,287 @@ function Set-SabnzbdCategory {
     return $categoriesRegex.Replace($Content, $appendEvaluator, 1)
 }
 
+function Get-EnvironmentValue {
+    param(
+        [string]$Name,
+        [string]$Default = ''
+    )
+
+    $value = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if ($null -eq $value -or $value -eq '') { return $Default }
+    return $value
+}
+
+function Get-EnvironmentBool {
+    param(
+        [string]$Name,
+        [bool]$Default
+    )
+
+    $value = Get-EnvironmentValue -Name $Name
+    if (-not $value) { return $Default }
+    return $value -match '^(1|true|yes|on)$'
+}
+
+function ConvertTo-SabnzbdIniValue {
+    param([object]$Value)
+
+    if ($null -eq $Value) { return '' }
+    if ($Value -is [bool]) { return $(if ($Value) { '1' } else { '0' }) }
+
+    $text = [string]$Value
+    if ($text -match "[`r`n]") { throw 'SABnzbd server values cannot contain newlines.' }
+    if ($text -match '^[0-9]+$') { return $text }
+    if ($text -match '[#;=\[\]"''\s]') {
+        return '"' + $text.Replace('\', '\\').Replace('"', '\"') + '"'
+    }
+
+    return $text
+}
+
+function New-SabnzbdServerSpec {
+    param(
+        [string]$Prefix,
+        [int]$DefaultPriority,
+        [bool]$DefaultOptional
+    )
+
+    $hostValue = Get-EnvironmentValue -Name "${Prefix}_HOST"
+    if (-not $hostValue) { return $null }
+
+    $usernameValue = Get-EnvironmentValue -Name "${Prefix}_USER"
+    if (-not $usernameValue) { $usernameValue = Get-EnvironmentValue -Name "${Prefix}_USERNAME" }
+    $passwordValue = Get-EnvironmentValue -Name "${Prefix}_PASS"
+    if (-not $passwordValue) { $passwordValue = Get-EnvironmentValue -Name "${Prefix}_PASSWORD" }
+    if (-not $usernameValue -or -not $passwordValue) {
+        throw "${Prefix}_HOST is set, so ${Prefix}_USER and ${Prefix}_PASS are required."
+    }
+
+    $nameValue = Get-EnvironmentValue -Name "${Prefix}_NAME" -Default $hostValue
+    $displayNameValue = Get-EnvironmentValue -Name "${Prefix}_DISPLAY_NAME" -Default $nameValue
+    $portValue = [int](Get-EnvironmentValue -Name "${Prefix}_PORT" -Default '563')
+    $connectionsValue = [int](Get-EnvironmentValue -Name "${Prefix}_CONNECTIONS" -Default '20')
+    $priorityValue = [int](Get-EnvironmentValue -Name "${Prefix}_PRIORITY" -Default ([string]$DefaultPriority))
+    $sslValue = Get-EnvironmentBool -Name "${Prefix}_SSL" -Default $true
+    $enableValue = Get-EnvironmentBool -Name "${Prefix}_ENABLE" -Default $true
+    $optionalValue = Get-EnvironmentBool -Name "${Prefix}_OPTIONAL" -Default $DefaultOptional
+    $requiredValue = Get-EnvironmentBool -Name "${Prefix}_REQUIRED" -Default $false
+
+    return [pscustomobject]@{
+        Name = $nameValue
+        DisplayName = $displayNameValue
+        Host = $hostValue
+        Port = $portValue
+        Username = $usernameValue
+        Password = $passwordValue
+        Connections = $connectionsValue
+        Ssl = $sslValue
+        Enable = $enableValue
+        Priority = $priorityValue
+        Optional = $optionalValue
+        Required = $requiredValue
+        Retention = [int](Get-EnvironmentValue -Name "${Prefix}_RETENTION" -Default '0')
+        SslVerify = [int](Get-EnvironmentValue -Name "${Prefix}_SSL_VERIFY" -Default '2')
+    }
+}
+
+function Get-ObjectValue {
+    param(
+        [object]$Object,
+        [string]$Name,
+        [object]$Default = $null
+    )
+
+    $property = @($Object.PSObject.Properties[$Name] | Select-Object -First 1)
+    if ($property.Count -eq 0 -or $null -eq $property[0].Value -or $property[0].Value -eq '') { return $Default }
+    return $property[0].Value
+}
+
+function Get-SabnzbdServerSpecs {
+    $serversJson = Get-EnvironmentValue -Name 'SAB_SERVERS_JSON'
+    if ($serversJson) {
+        try {
+            $parsed = $serversJson | ConvertFrom-Json
+        }
+        catch {
+            throw "SAB_SERVERS_JSON is not valid JSON: $_"
+        }
+
+        $serversProperty = @($parsed.PSObject.Properties['servers'] | Select-Object -First 1)
+        $items = if ($serversProperty.Count -gt 0) { @($serversProperty[0].Value) } else { @($parsed) }
+        return @($items | ForEach-Object {
+            $entry = $_
+            $hostValue = [string](Get-ObjectValue -Object $entry -Name 'host')
+            $usernameValue = [string](Get-ObjectValue -Object $entry -Name 'username')
+            $passwordValue = [string](Get-ObjectValue -Object $entry -Name 'password')
+            if (-not $hostValue -or -not $usernameValue -or -not $passwordValue) {
+                throw 'Each SAB_SERVERS_JSON entry requires host, username, and password.'
+            }
+
+            $nameValue = Get-ObjectValue -Object $entry -Name 'name' -Default $hostValue
+            [pscustomobject]@{
+                Name = $nameValue
+                DisplayName = Get-ObjectValue -Object $entry -Name 'displayName' -Default $nameValue
+                Host = $hostValue
+                Port = [int](Get-ObjectValue -Object $entry -Name 'port' -Default 563)
+                Username = $usernameValue
+                Password = $passwordValue
+                Connections = [int](Get-ObjectValue -Object $entry -Name 'connections' -Default 20)
+                Ssl = [bool](Get-ObjectValue -Object $entry -Name 'ssl' -Default $true)
+                Enable = [bool](Get-ObjectValue -Object $entry -Name 'enable' -Default $true)
+                Priority = [int](Get-ObjectValue -Object $entry -Name 'priority' -Default 0)
+                Optional = [bool](Get-ObjectValue -Object $entry -Name 'optional' -Default $false)
+                Required = [bool](Get-ObjectValue -Object $entry -Name 'required' -Default $false)
+                Retention = [int](Get-ObjectValue -Object $entry -Name 'retention' -Default 0)
+                SslVerify = [int](Get-ObjectValue -Object $entry -Name 'sslVerify' -Default 2)
+            }
+        })
+    }
+
+    $serverSpecs = @()
+    $primaryServer = New-SabnzbdServerSpec -Prefix 'SAB_SERVER' -DefaultPriority 0 -DefaultOptional $false
+    if ($primaryServer) { $serverSpecs += $primaryServer }
+
+    $backupServer = New-SabnzbdServerSpec -Prefix 'SAB_BACKUP_SERVER' -DefaultPriority 1 -DefaultOptional $true
+    if ($backupServer) { $serverSpecs += $backupServer }
+
+    return $serverSpecs
+}
+
+function Set-SabnzbdServer {
+    param(
+        [string]$Content,
+        [object]$Server
+    )
+
+    if ($Server.Name -match "[`r`n\[\]]") {
+        throw "Invalid SABnzbd server name: $($Server.Name)"
+    }
+
+    if (-not [regex]::IsMatch($Content, '(?m)^\[servers\]\r?$')) {
+        if ($Content -and -not $Content.EndsWith("`n")) { $Content += "`r`n" }
+        $Content += "[servers]`r`n"
+    }
+
+    $entries = [ordered]@{
+        name = $Server.Name
+        displayname = $Server.DisplayName
+        host = $Server.Host
+        port = $Server.Port
+        timeout = 120
+        username = $Server.Username
+        password = $Server.Password
+        connections = $Server.Connections
+        ssl = $Server.Ssl
+        ssl_verify = $Server.SslVerify
+        enable = $Server.Enable
+        required = $Server.Required
+        optional = $Server.Optional
+        retention = $Server.Retention
+        send_group = 0
+        priority = $Server.Priority
+    }
+
+    $escapedName = [regex]::Escape($Server.Name)
+    $serverPattern = "(?ms)(^\[\[$escapedName\]\]\r?\n)(.*?)(?=^\[\[|^\[|\z)"
+    if ([regex]::IsMatch($Content, $serverPattern)) {
+        $serverRegex = [System.Text.RegularExpressions.Regex]::new($serverPattern)
+        $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+            param($match)
+            $body = $match.Groups[2].Value
+            foreach ($key in $entries.Keys) {
+                $value = ConvertTo-SabnzbdIniValue $entries[$key]
+                $keyPattern = "(?m)^$([regex]::Escape($key))\s*=.*$"
+                if ([regex]::IsMatch($body, $keyPattern)) {
+                    $body = [regex]::Replace($body, $keyPattern, "$key = $value")
+                }
+                else {
+                    if ($body -and -not $body.EndsWith("`n")) { $body += "`r`n" }
+                    $body += "$key = $value`r`n"
+                }
+            }
+            return $match.Groups[1].Value + $body
+        }
+
+        return $serverRegex.Replace($Content, $evaluator, 1)
+    }
+
+    $serverBlock = "[[$($Server.Name)]]`r`n"
+    foreach ($key in $entries.Keys) {
+        $serverBlock += "$key = $(ConvertTo-SabnzbdIniValue $entries[$key])`r`n"
+    }
+
+    $serversPattern = '(?ms)(^\[servers\]\r?\n)(.*?)(?=^\[|\z)'
+    $serversRegex = [System.Text.RegularExpressions.Regex]::new($serversPattern)
+    $appendEvaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param($match)
+        $body = $match.Groups[2].Value
+        if ($body -and -not $body.EndsWith("`n")) { $body += "`r`n" }
+        return $match.Groups[1].Value + $body + $serverBlock
+    }
+
+    return $serversRegex.Replace($Content, $appendEvaluator, 1)
+}
+
+function Ensure-SonarrNamingConfig {
+    param(
+        [string]$BaseUrl,
+        [string]$ApiKey
+    )
+
+    $uri = "$BaseUrl/api/v3/config/naming"
+    $config = Invoke-ArrApi -Method GET -Uri $uri -ApiKey $ApiKey
+
+    Set-ObjectProperty -Object $config -Name 'renameEpisodes' -Value $true
+    Set-ObjectProperty -Object $config -Name 'replaceIllegalCharacters' -Value $true
+    Set-ObjectProperty -Object $config -Name 'colonReplacementFormat' -Value 4
+    Set-ObjectProperty -Object $config -Name 'customColonReplacementFormat' -Value ''
+    Set-ObjectProperty -Object $config -Name 'multiEpisodeStyle' -Value 5
+    Set-ObjectProperty -Object $config -Name 'standardEpisodeFormat' -Value '{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}'
+    Set-ObjectProperty -Object $config -Name 'dailyEpisodeFormat' -Value '{Series Title} - {Air-Date} - {Episode Title} {Quality Full}'
+    Set-ObjectProperty -Object $config -Name 'animeEpisodeFormat' -Value '{Series CleanTitleWithoutYear} {(Series Year)} - S{season:00}E{episode:00} - {absolute:000} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{MediaInfo AudioLanguages}{[MediaInfo VideoDynamicRangeType]}[{Mediainfo VideoCodec }{MediaInfo VideoBitDepth}bit]{-Release Group}'
+    Set-ObjectProperty -Object $config -Name 'seriesFolderFormat' -Value '{Series CleanTitleWithoutYear} {(Series Year)}'
+    Set-ObjectProperty -Object $config -Name 'seasonFolderFormat' -Value 'Season {season:00}'
+    Set-ObjectProperty -Object $config -Name 'specialsFolderFormat' -Value 'Specials'
+
+    Invoke-ArrApi -Method PUT -Uri $uri -ApiKey $ApiKey -Body $config | Out-Null
+    Write-Host 'Sonarr episode naming baseline configured.'
+}
+
+function Ensure-SonarrMediaManagementConfig {
+    param(
+        [string]$BaseUrl,
+        [string]$ApiKey
+    )
+
+    $uri = "$BaseUrl/api/v3/config/mediamanagement"
+    $config = Invoke-ArrApi -Method GET -Uri $uri -ApiKey $ApiKey
+
+    Set-ObjectProperty -Object $config -Name 'autoUnmonitorPreviouslyDownloadedEpisodes' -Value $false
+    Set-ObjectProperty -Object $config -Name 'recycleBin' -Value ''
+    Set-ObjectProperty -Object $config -Name 'recycleBinCleanupDays' -Value 7
+    Set-ObjectProperty -Object $config -Name 'downloadPropersAndRepacks' -Value 'preferAndUpgrade'
+    Set-ObjectProperty -Object $config -Name 'createEmptySeriesFolders' -Value $false
+    Set-ObjectProperty -Object $config -Name 'deleteEmptyFolders' -Value $false
+    Set-ObjectProperty -Object $config -Name 'fileDate' -Value 'none'
+    Set-ObjectProperty -Object $config -Name 'rescanAfterRefresh' -Value 'always'
+    Set-ObjectProperty -Object $config -Name 'setPermissionsLinux' -Value $false
+    Set-ObjectProperty -Object $config -Name 'chmodFolder' -Value '755'
+    Set-ObjectProperty -Object $config -Name 'chownGroup' -Value ''
+    Set-ObjectProperty -Object $config -Name 'episodeTitleRequired' -Value 'always'
+    Set-ObjectProperty -Object $config -Name 'skipFreeSpaceCheckWhenImporting' -Value $false
+    Set-ObjectProperty -Object $config -Name 'minimumFreeSpaceWhenImporting' -Value 100
+    Set-ObjectProperty -Object $config -Name 'copyUsingHardlinks' -Value $true
+    Set-ObjectProperty -Object $config -Name 'useScriptImport' -Value $false
+    Set-ObjectProperty -Object $config -Name 'scriptImportPath' -Value ''
+    Set-ObjectProperty -Object $config -Name 'importExtraFiles' -Value $false
+    Set-ObjectProperty -Object $config -Name 'extraFileExtensions' -Value 'srt'
+    Set-ObjectProperty -Object $config -Name 'enableMediaInfo' -Value $true
+
+    Invoke-ArrApi -Method PUT -Uri $uri -ApiKey $ApiKey -Body $config | Out-Null
+    Write-Host 'Sonarr media management baseline configured.'
+}
+
 function Ensure-SabnzbdConfig {
     param(
         [string]$Username,
@@ -284,15 +607,30 @@ function Ensure-SabnzbdConfig {
     $updatedContent = Set-SabnzbdCategory -Content $updatedContent -Name 'tv' -Directory 'tv'
     $updatedContent = Set-SabnzbdCategory -Content $updatedContent -Name 'movies' -Directory 'movies'
 
+    $serverSpecs = @(Get-SabnzbdServerSpecs)
+    foreach ($serverSpec in $serverSpecs) {
+        $updatedContent = Set-SabnzbdServer -Content $updatedContent -Server $serverSpec
+    }
+
     if ($updatedContent -eq $configContent) {
-        Write-Host 'SABnzbd UI credentials and download paths verified.'
+        if ($serverSpecs.Count -gt 0) {
+            Write-Host "SABnzbd UI credentials, download paths, and $($serverSpecs.Count) server(s) verified."
+        }
+        else {
+            Write-Host 'SABnzbd UI credentials and download paths verified. Set SAB_SERVER_HOST/SAB_SERVER_USER/SAB_SERVER_PASS to automate provider servers.'
+        }
         return
     }
 
     Invoke-DockerComposeQuiet -Arguments @('stop', 'sabnzbd')
     [System.IO.File]::WriteAllText((Resolve-Path $configPath), $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
     Invoke-DockerComposeQuiet -Arguments @('up', '-d', 'sabnzbd')
-    Write-Host 'SABnzbd UI credentials and download paths configured.'
+    if ($serverSpecs.Count -gt 0) {
+        Write-Host "SABnzbd UI credentials, download paths, and $($serverSpecs.Count) server(s) configured."
+    }
+    else {
+        Write-Host 'SABnzbd UI credentials and download paths configured.'
+    }
 }
 
 function Get-QbitSession {
@@ -597,6 +935,7 @@ function Upsert-QbitDownloadClient {
     Set-FieldValue -Fields $payload.fields -Name 'username' -Value $QbitUsername
     Set-FieldValue -Fields $payload.fields -Name 'password' -Value $QbitPassword
     Set-FieldValue -Fields $payload.fields -Name $CategoryField -Value $Category
+    Set-DownloadClientPriorityFields -Fields $payload.fields -CategoryField $CategoryField -Priority 0
 
     foreach ($optionalField in @('urlBase', ($CategoryField -replace 'Category$', 'ImportedCategory'), 'initialState', 'sequentialOrder', 'firstAndLast', 'contentLayout')) {
         $field = @($payload.fields | Where-Object { $_.name -eq $optionalField } | Select-Object -First 1)
@@ -653,6 +992,7 @@ function Upsert-SabnzbdDownloadClient {
     Set-FieldValue -Fields $payload.fields -Name 'username' -Value $SabnzbdUsername
     Set-FieldValue -Fields $payload.fields -Name 'password' -Value $SabnzbdPassword
     Set-FieldValue -Fields $payload.fields -Name $CategoryField -Value $Category
+    Set-DownloadClientPriorityFields -Fields $payload.fields -CategoryField $CategoryField -Priority -100
 
     if ($existing) {
         Set-ObjectProperty -Object $payload -Name 'id' -Value $existing.id
@@ -711,6 +1051,9 @@ Write-Host 'Bootstrapping media stack app links...'
 
 Upsert-ProwlarrApplication -Name 'Sonarr' -Implementation 'Sonarr' -ConfigContract 'SonarrSettings' -BaseUrl $SonarrInternalUrl -ApiKey $sonarrApiKey -SyncCategories $SonarrSyncCategories -AnimeSyncCategories $SonarrAnimeSyncCategories
 Upsert-ProwlarrApplication -Name 'Radarr' -Implementation 'Radarr' -ConfigContract 'RadarrSettings' -BaseUrl $RadarrInternalUrl -ApiKey $radarrApiKey -SyncCategories $RadarrSyncCategories
+
+Ensure-SonarrNamingConfig -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey
+Ensure-SonarrMediaManagementConfig -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey
 
 Upsert-SabnzbdDownloadClient -AppName 'Sonarr' -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey -SabnzbdApiKey $sabnzbdApiKey -CategoryField 'tvCategory' -Category $TvCategory
 Upsert-SabnzbdDownloadClient -AppName 'Radarr' -BaseUrl $RadarrExternalUrl -ApiKey $radarrApiKey -SabnzbdApiKey $sabnzbdApiKey -CategoryField 'movieCategory' -Category $MovieCategory

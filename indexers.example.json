@@ -1,28 +1,25 @@
 {
   "indexers": [
     {
-      "schemaName": "oznzb",
-      "name": "OZnzb",
-      "enable": false,
+      "schemaName": "animetosho-xyz",
+      "enable": true,
       "priority": 10,
       "appProfileId": 1,
       "fields": {
-        "apiKey": "env:OZNZB_API_KEY"
+        "apiKey": "env:ANIMETOSHO_API_KEY"
       }
     },
     {
-      "schemaName": "drunkenslug",
-      "name": "DrunkenSlug",
-      "enable": false,
-      "priority": 10,
+      "schemaName": "nyaasi",
+      "enable": true,
       "appProfileId": 1,
       "fields": {
-        "apiKey": "env:DRUNKENSLUG_API_KEY"
+        "baseUrl": "https://nyaa.si/",
+        "torrentBaseSettings.preferMagnetUrl": true
       }
     },
     {
       "schemaName": "nzbgeek",
-      "name": "NZBGeek",
       "enable": false,
       "priority": 10,
       "appProfileId": 1,
@@ -30,17 +27,21 @@
         "apiKey": "env:NZBGEEK_API_KEY"
       }
     },
-    {
-      "schemaName": "0Magnet",
-      "name": "0Magnet",
+    { 
+      "schemaName": "nzbplanet",
       "enable": false,
-      "priority": 25,
+      "priority": 10,
       "appProfileId": 1,
       "fields": {
-        "baseUrl": "https://16mag.net/",
-        "torrentBaseSettings.seedRatio": 1,
-        "torrentBaseSettings.seedTime": 1440,
-        "torrentBaseSettings.packSeedTime": 1440,
+        "apiKey": "env:NZBPLANET_API_KEY"
+      }
+    },
+    {
+      "schemaName": "thepiratebay",
+      "enable": true,
+      "appProfileId": 1,
+      "fields": {
+        "baseUrl": "https://thepiratebay.org/",
         "torrentBaseSettings.preferMagnetUrl": true
       }
     }

@@ -203,6 +203,8 @@ The helper prompts for:
 - `NORD_PASS`
 - `QBIT_PASS` for bootstrap automation
 - `SABNZBD_USER` / `SABNZBD_PASS`
+- `SAB_SERVER_HOST` / `SAB_SERVER_USER` / `SAB_SERVER_PASS` for the primary Usenet provider
+- optional `SAB_BACKUP_SERVER_HOST` / `SAB_BACKUP_SERVER_USER` / `SAB_BACKUP_SERVER_PASS` for a backup or block account
 - `TS_AUTHKEY` for a Tailscale overlay or the optional Windows Tailscale container
 - `SONARR_USER` / `SONARR_PASS`
 - `RADARR_USER` / `RADARR_PASS`
@@ -344,7 +346,7 @@ Keep that PowerShell window open after `.\stack.ps1 env`; the secrets live only 
 
 Order matters — doing it in this sequence avoids re-entering things.
 
-**1. Run bootstrap after first startup.** Run `up` once before `bootstrap`; the apps need to create their `config/` files and API keys first. Bootstrap then configures UI logins, SABnzbd paths, qBittorrent paths/seeding limits, Prowlarr app links, Sonarr/Radarr download clients, and root folders.
+**1. Run bootstrap after first startup.** Run `up` once before `bootstrap`; the apps need to create their `config/` files and API keys first. Bootstrap then configures UI logins, SABnzbd paths and provider servers, qBittorrent paths/seeding limits, Prowlarr app links, Sonarr episode naming and media management, Sonarr/Radarr download clients, and root folders.
 
 On a fresh installation, bootstrap configures forms authentication for qBittorrent, SABnzbd, Sonarr, Radarr, Prowlarr, and Bazarr. It initializes the Jellyfin administrator from `JELLYFIN_USER` / `JELLYFIN_PASS`, then configures Seerr from that Jellyfin administrator using `SEERR_EMAIL`. Passwords are only read from runtime environment variables; qBittorrent uses a salted PBKDF2 hash and Bazarr uses its documented MD5 password hash in their local configuration. No temporary password or manual Web UI configuration is needed. Passwords must be at least six characters long.
 
@@ -371,6 +373,12 @@ Radarr category: movies
 Usenet path: /data/usenet
 Torrent path: /data/torrents
 ```
+
+Radarr download clients are baselined too: SABnzbd uses `movies`, priority `1`, completed download handling on, and default movie priorities; qBittorrent uses `movies`, post-import category `movies-imported`, priority `2`, completed download handling off, and default movie priorities.
+
+Sonarr media management is also baselined from the current dev config: episode renaming is enabled, hardlinks are enabled, proper/repack upgrades are preferred, season folders are `Season {season:00}`, specials go under `Specials`, and anime names include series year, season/episode, absolute number, custom formats, quality, media info, and release group.
+
+For more than two SABnzbd servers, inject `SAB_SERVERS_JSON` from your secret manager instead of using the interactive helper. It accepts either an array or an object with a `servers` array. Each server needs `host`, `username`, and `password`; optional fields include `name`, `displayName`, `port`, `connections`, `ssl`, `enable`, `priority`, `optional`, `required`, `retention`, and `sslVerify`.
 
 **2. Configure Prowlarr indexers.** Copy the example, edit it, then import. Disabled entries are skipped, so enable only the NZB and torrent indexers you actually have credentials for:
 
@@ -612,7 +620,7 @@ Back up before upgrading. `./stack.sh backup` or `.\stack.ps1 backup` stops the 
 
 **Everything works on the LAN but hangs over Tailscale.** Gluetun's firewall is dropping return traffic to tailnet clients. `FIREWALL_OUTBOUND_SUBNETS` must include `100.64.0.0/10` — it does in the shipped config, so check that your edited `.env` did not lose it.
 
-**SABnzbd cannot download from Usenet.** Bootstrap wires SABnzbd into Sonarr/Radarr, but you still need a Usenet provider configured in SABnzbd. Use SSL, usually port `563`, and the provider credentials from your Usenet account.
+**SABnzbd cannot download from Usenet.** Rerun `./stack.ps1 env --force` or `source ./scripts/set-env.sh --force`, set the `SAB_SERVER_*` provider values, then rerun bootstrap. Provider server credentials are read from the shell and written into SABnzbd's local config, not committed to this repo.
 
 **ErsatzTV opens but Jellyfin has no channels.** ErsatzTV creates channels, but Jellyfin does not discover them automatically. In Jellyfin, add an M3U tuner using `http://ersatztv:8409/iptv/channels.m3u`, then add XMLTV guide data from `http://ersatztv:8409/iptv/xmltv.xml` and refresh guide data.
 
