@@ -445,7 +445,9 @@ Use ErsatzTV for lean-back channels: shuffled sitcom blocks, network-themed sche
 
 **7. Bazarr** last. Point it at Sonarr and Radarr, create a language profile, let it backfill.
 
-**8. Prove the pipeline with one title.** Add a single show, watch it go from grab to Jellyfin, then confirm the hardlink:
+**8. Seerr** is auto-configured by bootstrap: API keys are read from Sonarr and Radarr config, and quality profiles are synced. After bootstrap restarts Seerr, it will be ready to request content. Log in with your Jellyfin administrator account (configured in `JELLYFIN_USER`/`JELLYFIN_PASS`), or use the email in `SEERR_EMAIL` if auto-initialization is disabled.
+
+**9. Prove the pipeline with one title.** Add a single show, watch it go from grab to Jellyfin, then confirm the hardlink:
 
 ```bash
 df -h /data                                    # note usage

@@ -720,4 +720,11 @@ Upsert-QbitDownloadClient -AppName 'Radarr' -BaseUrl $RadarrExternalUrl -ApiKey 
 Ensure-RootFolder -AppName 'Sonarr' -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey -Path $TvRootFolder
 Ensure-RootFolder -AppName 'Radarr' -BaseUrl $RadarrExternalUrl -ApiKey $radarrApiKey -Path $MovieRootFolder
 
+Write-Host ''
+Write-Host 'Configuring Seerr...'
+& "$PSScriptRoot\bootstrap-seerr.ps1" -SonarrExternalUrl $SonarrExternalUrl -RadarrExternalUrl $RadarrExternalUrl
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'WARNING: Seerr bootstrap failed, but main bootstrap completed. Restart Seerr and try again manually.'
+}
+
 Write-Host 'Bootstrap complete.'
