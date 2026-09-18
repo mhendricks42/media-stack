@@ -295,6 +295,21 @@ function Ensure-JellyfinAdmin {
     return $session
 }
 
+function Wait-JellyfinAuthenticated {
+    param([int]$TimeoutSeconds = 90)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastError = ''
+    while ((Get-Date) -lt $deadline) {
+        $session = Get-JellyfinSession
+        if ($session) { return $session }
+        $lastError = 'Jellyfin authentication endpoint is not ready yet.'
+        Start-Sleep -Seconds 2
+    }
+
+    throw "Jellyfin did not accept the administrator credentials within $TimeoutSeconds seconds. $lastError"
+}
+
 function Initialize-SeerrWithJellyfin {
     param([object]$JellyfinSession)
 
@@ -344,6 +359,7 @@ $jellyfinSession = Ensure-JellyfinAdmin
 if ($LASTEXITCODE -ne 0) {
     throw 'Jellyfin baseline bootstrap failed.'
 }
+$jellyfinSession = Wait-JellyfinAuthenticated
 Initialize-SeerrWithJellyfin -JellyfinSession $jellyfinSession
 
 Write-Host 'UI authentication bootstrap complete.'

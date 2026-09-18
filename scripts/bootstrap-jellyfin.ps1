@@ -214,7 +214,7 @@ function Ensure-JellyfinLibrary {
 
         Invoke-JsonRequest -Method POST -Uri "http://localhost:8096/Library/VirtualFolders/Paths?name=$([uri]::EscapeDataString($Name))" `
             -Headers $Headers `
-            -Body @{ Path = $Path } | Out-Null
+            -Body @{ Name = $Name; Path = $Path } | Out-Null
         Write-Host "Jellyfin library path added: $Name -> $Path"
         return
     }
@@ -255,19 +255,37 @@ function Ensure-XmlElementBool {
 
 function Ensure-JellyfinLiveTvConfig {
     $configPath = '.\config\jellyfin\livetv.xml'
-    if (-not (Test-Path $configPath)) {
-        throw "Missing Jellyfin Live TV config: $configPath. Start Jellyfin once before bootstrap."
+    if (Test-Path $configPath) {
+        $original = Get-Content -Raw $configPath
+        [xml]$xml = $original
+    }
+    else {
+        $xml = New-Object System.Xml.XmlDocument
+        $declaration = $xml.CreateXmlDeclaration('1.0', 'utf-8', $null)
+        $xml.AppendChild($declaration) | Out-Null
+        $rootNode = $xml.CreateElement('LiveTvOptions')
+        $xml.AppendChild($rootNode) | Out-Null
+        $original = ''
     }
 
-    $original = Get-Content -Raw $configPath
-    [xml]$xml = $original
-    $root = $xml.LiveTvOptions
+    $root = $xml.DocumentElement
 
-    $tuner = @($root.TunerHosts.TunerHostInfo | Where-Object { $_.Url -eq $LiveTvTunerUrl } | Select-Object -First 1)
+    $tunerHosts = $root.SelectSingleNode('TunerHosts')
+    if ($null -eq $tunerHosts) {
+        $tunerHosts = $xml.CreateElement('TunerHosts')
+        $root.AppendChild($tunerHosts) | Out-Null
+    }
+
+    $listingProviders = $root.SelectSingleNode('ListingProviders')
+    if ($null -eq $listingProviders) {
+        $listingProviders = $xml.CreateElement('ListingProviders')
+        $root.AppendChild($listingProviders) | Out-Null
+    }
+
+    $tuner = @($tunerHosts.SelectNodes('TunerHostInfo') | Where-Object { $_.Url -eq $LiveTvTunerUrl } | Select-Object -First 1)
     if ($tuner.Count -eq 0) {
-        if (-not $root.TunerHosts) { $root.AppendChild($xml.CreateElement('TunerHosts')) | Out-Null }
         $tunerNode = $xml.CreateElement('TunerHostInfo')
-        $root.TunerHosts.AppendChild($tunerNode) | Out-Null
+        $tunerHosts.AppendChild($tunerNode) | Out-Null
         Ensure-XmlElementValue -Xml $xml -Parent $tunerNode -Name 'Id' -Value ([guid]::NewGuid().ToString('N'))
         $tuner = @($tunerNode)
     }
@@ -284,11 +302,10 @@ function Ensure-JellyfinLiveTvConfig {
     Ensure-XmlElementBool -Xml $xml -Parent $tunerNode -Name 'IgnoreDts' -Value $true
     Ensure-XmlElementBool -Xml $xml -Parent $tunerNode -Name 'ReadAtNativeFramerate' -Value $true
 
-    $provider = @($root.ListingProviders.ListingsProviderInfo | Where-Object { $_.Path -eq $LiveTvGuideUrl } | Select-Object -First 1)
+    $provider = @($listingProviders.SelectNodes('ListingsProviderInfo') | Where-Object { $_.Path -eq $LiveTvGuideUrl } | Select-Object -First 1)
     if ($provider.Count -eq 0) {
-        if (-not $root.ListingProviders) { $root.AppendChild($xml.CreateElement('ListingProviders')) | Out-Null }
         $providerNode = $xml.CreateElement('ListingsProviderInfo')
-        $root.ListingProviders.AppendChild($providerNode) | Out-Null
+        $listingProviders.AppendChild($providerNode) | Out-Null
         Ensure-XmlElementValue -Xml $xml -Parent $providerNode -Name 'Id' -Value ([guid]::NewGuid().ToString('N'))
         $provider = @($providerNode)
     }
@@ -298,20 +315,21 @@ function Ensure-JellyfinLiveTvConfig {
     Ensure-XmlElementBool -Xml $xml -Parent $providerNode -Name 'EnableAllTuners' -Value $true
 
     $settings = New-Object System.Xml.XmlWriterSettings
-    $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
+    $settings.Encoding = New-Object System.Text.UnicodeEncoding($false, $true)
     $settings.Indent = $true
     $settings.OmitXmlDeclaration = $false
     $builder = New-Object System.Text.StringBuilder
     $writer = [System.Xml.XmlWriter]::Create($builder, $settings)
     try { $xml.Save($writer) } finally { $writer.Dispose() }
-    $updated = $builder.ToString()
+    $updated = $builder.ToString() -replace '<\?xml version="1\.0" encoding="[^"]*"\?>', '<?xml version="1.0" encoding="utf-16"?>'
 
     if ($updated -eq $original) {
         Write-Host 'Jellyfin Live TV tuner and guide verified.'
         return $false
     }
 
-    [System.IO.File]::WriteAllText((Resolve-Path $configPath), $updated, (New-Object System.Text.UTF8Encoding($false)))
+    $fullConfigPath = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $configPath))
+    [System.IO.File]::WriteAllText($fullConfigPath, $updated, (New-Object System.Text.UnicodeEncoding($false, $true)))
     Write-Host 'Jellyfin Live TV tuner and guide configured.'
     return $true
 }

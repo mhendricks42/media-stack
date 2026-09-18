@@ -41,13 +41,6 @@ sonarr:
       - trash_id: 20e0fc959f1f1704bed501f23bdae76f # [Anime] Remux-1080p
         reset_unmatched_scores:
           enabled: true
-        qualities:
-          - name: Bluray 1080p
-            enabled: false
-          - name: Bluray-720p
-            enabled: false
-          - name: Bluray-480p
-            enabled: false
 
 radarr:
   movies:
@@ -61,10 +54,3 @@ radarr:
       - trash_id: d1d67249d3890e49bc12e275d989a7e9 # HD Bluray + WEB
         reset_unmatched_scores:
           enabled: true
-        qualities:
-          - name: Bluray-1080p
-            enabled: false
-          - name: Bluray-720p
-            enabled: false
-          - name: Bluray-480p
-            enabled: false
