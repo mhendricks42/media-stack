@@ -156,25 +156,56 @@ function Update-SeerrSettings {
 
     if ($Service -eq 'sonarr') {
         if ($settings.sonarr.Count -eq 0) {
-            $settings.sonarr = @(@{})
+            $settings.sonarr = @([pscustomobject]@{})
         }
-        $settings.sonarr[0].apiKey = $ApiKey
-        $settings.sonarr[0].activeProfileId = $ProfileId
-        $settings.sonarr[0].activeProfileName = $ProfileName
-        $settings.sonarr[0].activeAnimeProfileId = $ProfileId
-        $settings.sonarr[0].activeAnimeProfileName = $ProfileName
+        $instance = $settings.sonarr[0]
+        Set-JsonProperty -Object $instance -Name 'name' -Value 'Sonarr'
+        Set-JsonProperty -Object $instance -Name 'hostname' -Value 'sonarr'
+        Set-JsonProperty -Object $instance -Name 'port' -Value 8989
+        Set-JsonProperty -Object $instance -Name 'apiKey' -Value $ApiKey
+        Set-JsonProperty -Object $instance -Name 'useSsl' -Value $false
+        Set-JsonProperty -Object $instance -Name 'activeProfileId' -Value $ProfileId
+        Set-JsonProperty -Object $instance -Name 'activeProfileName' -Value $ProfileName
+        Set-JsonProperty -Object $instance -Name 'activeDirectory' -Value '/data/media/tv'
+        Set-JsonProperty -Object $instance -Name 'activeAnimeProfileId' -Value $ProfileId
+        Set-JsonProperty -Object $instance -Name 'activeAnimeProfileName' -Value $ProfileName
+        Set-JsonProperty -Object $instance -Name 'activeAnimeDirectory' -Value '/data/media/tv'
+        Set-JsonProperty -Object $instance -Name 'tags' -Value @()
+        Set-JsonProperty -Object $instance -Name 'animeTags' -Value @()
+        Set-JsonProperty -Object $instance -Name 'is4k' -Value $false
+        Set-JsonProperty -Object $instance -Name 'isDefault' -Value $true
+        Set-JsonProperty -Object $instance -Name 'enableSeasonFolders' -Value $true
+        Set-JsonProperty -Object $instance -Name 'syncEnabled' -Value $true
+        Set-JsonProperty -Object $instance -Name 'preventSearch' -Value $false
+        Set-JsonProperty -Object $instance -Name 'tagRequests' -Value $false
+        Set-JsonProperty -Object $instance -Name 'monitorNewItems' -Value 'all'
+        Set-JsonProperty -Object $instance -Name 'id' -Value 0
 
-        Write-Host "Updated Seerr Sonarr config: profile $ProfileId ($ProfileName)"
+        Write-Host "Updated Seerr Sonarr config: sonarr:8989, scans enabled, profile $ProfileId ($ProfileName)"
     }
     elseif ($Service -eq 'radarr') {
         if ($settings.radarr.Count -eq 0) {
-            $settings.radarr = @(@{})
+            $settings.radarr = @([pscustomobject]@{})
         }
-        $settings.radarr[0].apiKey = $ApiKey
-        $settings.radarr[0].activeProfileId = $ProfileId
-        $settings.radarr[0].activeProfileName = $ProfileName
+        $instance = $settings.radarr[0]
+        Set-JsonProperty -Object $instance -Name 'name' -Value 'Radarr'
+        Set-JsonProperty -Object $instance -Name 'hostname' -Value 'radarr'
+        Set-JsonProperty -Object $instance -Name 'port' -Value 7878
+        Set-JsonProperty -Object $instance -Name 'apiKey' -Value $ApiKey
+        Set-JsonProperty -Object $instance -Name 'useSsl' -Value $false
+        Set-JsonProperty -Object $instance -Name 'activeProfileId' -Value $ProfileId
+        Set-JsonProperty -Object $instance -Name 'activeProfileName' -Value $ProfileName
+        Set-JsonProperty -Object $instance -Name 'activeDirectory' -Value '/data/media/movies'
+        Set-JsonProperty -Object $instance -Name 'is4k' -Value $false
+        Set-JsonProperty -Object $instance -Name 'minimumAvailability' -Value 'released'
+        Set-JsonProperty -Object $instance -Name 'tags' -Value @()
+        Set-JsonProperty -Object $instance -Name 'isDefault' -Value $true
+        Set-JsonProperty -Object $instance -Name 'syncEnabled' -Value $true
+        Set-JsonProperty -Object $instance -Name 'preventSearch' -Value $false
+        Set-JsonProperty -Object $instance -Name 'tagRequests' -Value $false
+        Set-JsonProperty -Object $instance -Name 'id' -Value 0
 
-        Write-Host "Updated Seerr Radarr config: profile $ProfileId ($ProfileName)"
+        Write-Host "Updated Seerr Radarr config: radarr:7878, scans enabled, profile $ProfileId ($ProfileName)"
     }
 
     # Backup and write
