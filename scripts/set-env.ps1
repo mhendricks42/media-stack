@@ -56,6 +56,28 @@ function Read-SecretValue {
     }
 }
 
+function Read-OptionalSecretValue {
+    param(
+        [string]$Name,
+        [string]$Prompt
+    )
+
+    $existing = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if ($existing -and -not $Force) {
+        Write-Host "$Name is already set; keeping existing value. Use -Force to replace it."
+        return $existing
+    }
+
+    $secure = Read-Host "$Prompt (blank to skip)" -AsSecureString
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+
 function Set-SessionEnv {
     param([string]$Name, [string]$Value)
     [Environment]::SetEnvironmentVariable($Name, $Value, 'Process')
@@ -73,6 +95,10 @@ Set-SessionEnv 'QBIT_PASS' (Read-SecretValue 'QBIT_PASS' 'qBittorrent Web UI pas
 
 Set-SessionEnv 'SABNZBD_USER' (Read-Value 'SABNZBD_USER' 'SABnzbd Web UI username' 'admin' -Required)
 Set-SessionEnv 'SABNZBD_PASS' (Read-SecretValue 'SABNZBD_PASS' 'SABnzbd Web UI password' 6)
+
+Set-SessionEnv 'ANIMETOSHO_API_KEY' (Read-OptionalSecretValue 'ANIMETOSHO_API_KEY' 'AnimeTosho API key')
+Set-SessionEnv 'NZBGEEK_API_KEY' (Read-OptionalSecretValue 'NZBGEEK_API_KEY' 'NZBGeek API key')
+Set-SessionEnv 'NZBPLANET_API_KEY' (Read-OptionalSecretValue 'NZBPLANET_API_KEY' 'NZBPlanet API key')
 
 $sabServerHost = Read-Value 'SAB_SERVER_HOST' 'Primary Usenet server host (blank to skip)' ''
 if ($sabServerHost) {

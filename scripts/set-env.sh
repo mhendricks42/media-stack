@@ -51,6 +51,7 @@ read_secret() {
   local name="$1"
   local prompt="$2"
   local min_length="${3:-1}"
+  local required="${4:-1}"
   local current_value="${!name:-}"
   local value
 
@@ -62,6 +63,10 @@ read_secret() {
   while true; do
     read -r -s -p "$prompt: " value
     echo
+    if [[ -z "$value" && "$required" -eq 0 ]]; then
+      export "$name="
+      return 0
+    fi
     if (( ${#value} >= min_length )); then
       export "$name=$value"
       return 0
@@ -82,6 +87,10 @@ read_secret QBIT_PASS "qBittorrent Web UI password" 6
 
 read_value SABNZBD_USER "SABnzbd Web UI username" "admin"
 read_secret SABNZBD_PASS "SABnzbd Web UI password" 6
+
+read_secret ANIMETOSHO_API_KEY "AnimeTosho API key (blank to skip)" 1 0
+read_secret NZBGEEK_API_KEY "NZBGeek API key (blank to skip)" 1 0
+read_secret NZBPLANET_API_KEY "NZBPlanet API key (blank to skip)" 1 0
 
 read_value SAB_SERVER_HOST "Primary Usenet server host (blank to skip)" "" 0
 if [[ -n "${SAB_SERVER_HOST:-}" ]]; then

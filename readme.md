@@ -203,6 +203,7 @@ The helper prompts for:
 - `NORD_PASS`
 - `QBIT_PASS` for bootstrap automation
 - `SABNZBD_USER` / `SABNZBD_PASS`
+- optional `ANIMETOSHO_API_KEY`, `NZBGEEK_API_KEY`, and `NZBPLANET_API_KEY` for enabled indexers in `indexers.json`
 - `SAB_SERVER_HOST` / `SAB_SERVER_USER` / `SAB_SERVER_PASS` for the primary Usenet provider
 - optional `SAB_BACKUP_SERVER_HOST` / `SAB_BACKUP_SERVER_USER` / `SAB_BACKUP_SERVER_PASS` for a backup or block account
 - `TS_AUTHKEY` for a Tailscale overlay or the optional Windows Tailscale container
@@ -382,7 +383,7 @@ Jellyfin is baselined during bootstrap too: the server name defaults to `Media S
 
 For more than two SABnzbd servers, inject `SAB_SERVERS_JSON` from your secret manager instead of using the interactive helper. It accepts either an array or an object with a `servers` array. Each server needs `host`, `username`, and `password`; optional fields include `name`, `displayName`, `port`, `connections`, `ssl`, `enable`, `priority`, `optional`, `required`, `retention`, and `sslVerify`.
 
-**2. Configure Prowlarr indexers.** Copy the example, edit it, then import. Disabled entries are skipped, so enable only the NZB and torrent indexers you actually have credentials for:
+**2. Configure Prowlarr indexers.** Copy the example and edit it before bootstrap. Bootstrap imports `indexers.json` after creating Prowlarr's Sonarr/Radarr links; entries disabled in the file or missing their optional `env:` key are skipped. To rerun the idempotent importer after changing indexers or setting an API key:
 
 ```powershell
 Copy-Item .\indexers.example.json .\indexers.json

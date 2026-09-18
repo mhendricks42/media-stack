@@ -52,11 +52,11 @@ function Invoke-ProwlarrApi {
             $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
             $bodyText = $reader.ReadToEnd()
             if ($bodyText) {
-                throw "Prowlarr API request failed: $(Redact-SensitiveText $bodyText)"
+                throw "Prowlarr API $Method $Uri failed: $(Redact-SensitiveText $bodyText)"
             }
         }
 
-        throw
+        throw "Prowlarr API $Method $Uri failed: $($_.Exception.Message)"
     }
 }
 
@@ -121,6 +121,21 @@ function Set-IndexerField {
     Set-ObjectProperty -Object $field -Name 'value' -Value (Resolve-ConfigValue $Value)
 }
 
+function ConvertTo-FlatArray {
+    param([object]$Value)
+
+    foreach ($item in @($Value)) {
+        if ($item -is [System.Array]) {
+            foreach ($nestedItem in $item) {
+                $nestedItem
+            }
+        }
+        else {
+            $item
+        }
+    }
+}
+
 function Find-IndexerSchema {
     param(
         [object[]]$Schemas,
@@ -152,10 +167,10 @@ if (-not $config.indexers) {
 }
 
 $indexerUri = "$ProwlarrExternalUrl/api/v1/indexer"
-$schemas = @(Invoke-ProwlarrApi -Method GET -Uri "$indexerUri/schema" -ApiKey $prowlarrApiKey)
-$existingIndexers = @(Invoke-ProwlarrApi -Method GET -Uri $indexerUri -ApiKey $prowlarrApiKey)
+$schemas = @(ConvertTo-FlatArray (Invoke-ProwlarrApi -Method GET -Uri "$indexerUri/schema" -ApiKey $prowlarrApiKey))
+$existingIndexers = @(ConvertTo-FlatArray (Invoke-ProwlarrApi -Method GET -Uri $indexerUri -ApiKey $prowlarrApiKey))
 
-foreach ($item in @($config.indexers)) {
+:indexer foreach ($item in @($config.indexers)) {
     if ($null -ne $item.enable -and -not [bool]$item.enable) {
         Write-Host "Skipping disabled indexer entry: $($item.schemaName)"
         continue
@@ -183,6 +198,13 @@ foreach ($item in @($config.indexers)) {
     if ($item.fields) {
         $fieldProperties = $item.fields.PSObject.Properties
         foreach ($property in $fieldProperties) {
+            if ($property.Value -is [string] -and $property.Value.StartsWith('env:')) {
+                $environmentVariable = $property.Value.Substring(4)
+                if (-not [Environment]::GetEnvironmentVariable($environmentVariable, 'Process')) {
+                    Write-Host "Skipping indexer entry '$schemaName': missing environment variable '$environmentVariable'."
+                    continue indexer
+                }
+            }
             Set-IndexerField -Indexer $payload -FieldName $property.Name -Value $property.Value
         }
     }

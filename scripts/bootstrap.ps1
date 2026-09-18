@@ -1052,6 +1052,16 @@ Write-Host 'Bootstrapping media stack app links...'
 Upsert-ProwlarrApplication -Name 'Sonarr' -Implementation 'Sonarr' -ConfigContract 'SonarrSettings' -BaseUrl $SonarrInternalUrl -ApiKey $sonarrApiKey -SyncCategories $SonarrSyncCategories -AnimeSyncCategories $SonarrAnimeSyncCategories
 Upsert-ProwlarrApplication -Name 'Radarr' -Implementation 'Radarr' -ConfigContract 'RadarrSettings' -BaseUrl $RadarrInternalUrl -ApiKey $radarrApiKey -SyncCategories $RadarrSyncCategories
 
+if (Test-Path '.\indexers.json') {
+    & "$PSScriptRoot\import-prowlarr-indexers.ps1"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Prowlarr indexer import failed.'
+    }
+}
+else {
+    Write-Host 'Skipping Prowlarr indexer import: indexers.json does not exist. Copy indexers.example.json to indexers.json to enable it.'
+}
+
 Ensure-SonarrNamingConfig -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey
 Ensure-SonarrMediaManagementConfig -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey
 
