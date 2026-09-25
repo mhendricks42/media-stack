@@ -14,7 +14,7 @@ networks:
 
 services:
   gluetun:
-    image: qmcgaw/gluetun:latest
+    image: qmcgaw/gluetun:v3.41
     cap_add:
       - NET_ADMIN
     devices:
@@ -42,7 +42,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    image: lscr.io/linuxserver/qbittorrent:version-5.0.2
     network_mode: service:gluetun
     depends_on:
       gluetun:
@@ -61,7 +61,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   sabnzbd:
-    image: lscr.io/linuxserver/sabnzbd:latest
+    image: lscr.io/linuxserver/sabnzbd:version-4.3.3
     networks:
       - medianet
     security_opt:
@@ -78,7 +78,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
+    image: lscr.io/linuxserver/prowlarr:version-1.28.2.4885
     networks:
       - medianet
     security_opt:
@@ -94,7 +94,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   sonarr:
-    image: lscr.io/linuxserver/sonarr:latest
+    image: lscr.io/linuxserver/sonarr:4.0.20.3014-ls325
     networks:
       - medianet
     security_opt:
@@ -111,7 +111,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   radarr:
-    image: lscr.io/linuxserver/radarr:latest
+    image: lscr.io/linuxserver/radarr:version-5.17.1.9716
     networks:
       - medianet
     security_opt:
@@ -128,7 +128,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   bazarr:
-    image: lscr.io/linuxserver/bazarr:latest
+    image: lscr.io/linuxserver/bazarr:version-1.4.5
     networks:
       - medianet
     security_opt:
@@ -145,7 +145,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   jellyfin:
-    image: lscr.io/linuxserver/jellyfin:latest
+    image: lscr.io/linuxserver/jellyfin:version-10.10.3
     networks:
       - medianet
     security_opt:
@@ -162,7 +162,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   ersatztv:
-    image: jasongdove/ersatztv:latest
+    image: jasongdove/ersatztv:v0.9.0-vaapi
     networks:
       - medianet
     security_opt:
@@ -200,7 +200,7 @@ services:
     restart: "no"
 
   seerr:
-    image: ghcr.io/seerr-team/seerr:latest
+    image: ghcr.io/seerr-team/seerr:v4.2.2
     init: true
     networks:
       - medianet
