@@ -11,3 +11,6 @@ indexers.json
 
 # Archives
 backups/
+
+# VPN credential files (file-based secrets pattern)
+secrets/
