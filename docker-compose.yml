@@ -36,11 +36,11 @@ services:
       - SERVER_HOSTNAMES=${VPN_HOSTNAME:-}
       - TZ=${TZ:?Set TZ in .env}
       - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET:?Set LAN_SUBNET in .env},100.64.0.0/10
-    # healthcheck:
-    #   test: ["CMD", "wget", "-q", "--spider", "https://1.1.1.1"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 5
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "https://1.1.1.1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   qbittorrent:
