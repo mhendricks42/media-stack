@@ -33,6 +33,7 @@ services:
       - OPENVPN_USER=${NORD_USER:?Set NORD_USER in your shell environment, not in .env}
       - OPENVPN_PASSWORD=${NORD_PASS:?Set NORD_PASS in your shell environment, not in .env}
       - SERVER_COUNTRIES=${VPN_COUNTRY:?Set VPN_COUNTRY in .env}
+      - SERVER_HOSTNAMES=${VPN_HOSTNAME:-}
       - TZ=${TZ:?Set TZ in .env}
       - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET:?Set LAN_SUBNET in .env},100.64.0.0/10
     # healthcheck:
