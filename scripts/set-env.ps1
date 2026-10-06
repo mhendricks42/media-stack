@@ -87,9 +87,6 @@ Write-Host 'This wizard sets secrets only for this PowerShell session.'
 Write-Host 'Close this terminal to clear them, or overwrite them with -Force.'
 Write-Host ''
 
-Set-SessionEnv 'NORD_USER' (Read-Value 'NORD_USER' 'NordVPN OpenVPN/manual username' -Required)
-Set-SessionEnv 'NORD_PASS' (Read-SecretValue 'NORD_PASS' 'NordVPN OpenVPN/manual password')
-
 Set-SessionEnv 'QBIT_USER' (Read-Value 'QBIT_USER' 'qBittorrent Web UI username' 'admin' -Required)
 Set-SessionEnv 'QBIT_PASS' (Read-SecretValue 'QBIT_PASS' 'qBittorrent Web UI password' 6)
 

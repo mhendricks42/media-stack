@@ -79,9 +79,6 @@ echo "This wizard exports secrets only into the current shell session."
 echo "Close this terminal to clear them, or rerun with --force to replace them."
 echo
 
-read_value NORD_USER "NordVPN OpenVPN/manual username"
-read_secret NORD_PASS "NordVPN OpenVPN/manual password"
-
 read_value QBIT_USER "qBittorrent Web UI username" "admin"
 read_secret QBIT_PASS "qBittorrent Web UI password" 6
 

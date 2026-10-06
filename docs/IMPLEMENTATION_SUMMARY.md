@@ -39,21 +39,16 @@ docker compose config --quiet  # Syntax validated
 **Issue:** VPN credentials passed via `OPENVPN_USER` and `OPENVPN_PASSWORD` environment variables are **visible in `docker inspect` output** and container metadata (CVSS 8.2 - high local exposure).
 
 **Fix:**
-- Changed to file-based credentials: `OPENVPN_USER_FILE=/secrets/vpn_user`, `OPENVPN_PASSWORD_FILE=/secrets/vpn_password`
-- Added read-only secrets volume: `./secrets:/secrets:ro`
+- Added Docker Compose secrets at `/run/secrets/openvpn_user` and `/run/secrets/openvpn_password`
+- Limited both secrets to Gluetun and blanked legacy OpenVPN environment variables
+- Added interactive `init-vpn` helpers that never append a newline
 - Updated `.gitignore` to exclude `secrets/` directory
 - Created comprehensive migration guide: `docs/VPN_CREDENTIALS_MIGRATION.md`
 
 **Migration Required:**
 ```bash
 # Create secrets directory
-mkdir secrets
-chmod 700 secrets
-
-# Write credential files (no trailing newline!)
-echo -n "your_nordvpn_username" > secrets/vpn_user
-echo -n "your_nordvpn_password" > secrets/vpn_password
-chmod 600 secrets/vpn_*
+./stack.sh init-vpn
 
 # Restart stack
 docker compose down
@@ -65,8 +60,8 @@ docker compose up -d gluetun
 # Credentials should NOT appear in inspect output
 docker inspect media_stack-gluetun-1 | grep -i vpn
 
-# Files should be readable inside container
-docker exec media_stack-gluetun-1 cat /secrets/vpn_user
+# Inspect should show only blank OpenVPN environment variables
+docker inspect "$(docker compose ps -q gluetun)" | grep -i openvpn
 ```
 
 **Impact:** VPN credentials no longer exposed to anyone with Docker access on the host.
@@ -157,7 +152,6 @@ Created GitHub Actions workflow (`.github/workflows/compose-validate.yml`) that 
 **Local Validation:**
 ```bash
 # Before pushing changes
-export NORD_USER=test NORD_PASS=test
 docker compose config --quiet
 
 # Check for violations
@@ -245,10 +239,7 @@ git commit -m "security: apply code review recommendations
 ### 1. VPN Credentials Migration (REQUIRED)
 Follow `docs/VPN_CREDENTIALS_MIGRATION.md`:
 ```bash
-mkdir secrets
-echo -n "YOUR_NORD_USER" > secrets/vpn_user
-echo -n "YOUR_NORD_PASS" > secrets/vpn_password
-chmod 600 secrets/vpn_*
+./stack.sh init-vpn
 ```
 
 ### 2. Pull New Image Versions

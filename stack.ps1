@@ -17,6 +17,7 @@ trap {
 function Show-Usage {
     Write-Host "Usage:"
     Write-Host "  .\stack.ps1 use <linux|windows>"
+    Write-Host "  .\stack.ps1 init-vpn"
     Write-Host "  .\stack.ps1 init-windows [distro] [linux-user]"
     Write-Host "  .\stack.ps1 up|down|ps|pull|config"
     Write-Host "  .\stack.ps1 setup-data"
@@ -62,10 +63,8 @@ function Write-Check {
     }
 }
 
-function Test-SecretEnvironment {
+function Test-RuntimeSecrets {
     $missing = @()
-    if (-not $env:NORD_USER) { $missing += 'NORD_USER' }
-    if (-not $env:NORD_PASS) { $missing += 'NORD_PASS' }
     $composeFile = Get-ActiveComposeFile
     $composeProfiles = Get-EnvFileValue 'COMPOSE_PROFILES'
     if (($composeFile -match 'linux' -or $composeProfiles -match '(^|[,;\s])tailscale([,;\s]|$)') -and -not $env:TS_AUTHKEY) {
@@ -76,6 +75,75 @@ function Test-SecretEnvironment {
         $names = $missing -join ', '
         throw "Missing secret environment variable(s): $names. Set them in this shell or inject them from a secret manager; do not save them in .env."
     }
+}
+
+function Test-VpnSecrets {
+    $composeFile = Get-ActiveComposeFile
+    if ($composeFile -notmatch 'compose[/\\]secrets\.yml') {
+        throw 'compose\secrets.yml is missing from COMPOSE_FILE. Run .\stack.ps1 use windows or add the overlay to .env.'
+    }
+
+    foreach ($path in @('secrets\openvpn_user', 'secrets\openvpn_password')) {
+        if (-not (Test-Path $path) -or (Get-Item $path).Length -eq 0) {
+            throw "Missing or empty VPN secret: $path. Run .\stack.ps1 init-vpn."
+        }
+
+        $bytes = [IO.File]::ReadAllBytes($path)
+        if ($bytes -contains 10 -or $bytes -contains 13) {
+            throw "VPN secret contains a newline: $path. Recreate it with .\stack.ps1 init-vpn; do not use echo."
+        }
+    }
+}
+
+function Initialize-VpnSecrets {
+    $username = Read-Host 'NordVPN OpenVPN/manual username' -AsSecureString
+    $password = Read-Host 'NordVPN OpenVPN/manual password' -AsSecureString
+    $usernamePointer = [IntPtr]::Zero
+    $passwordPointer = [IntPtr]::Zero
+
+    try {
+        $usernamePointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($username)
+        $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
+        $usernameText = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($usernamePointer)
+        $passwordText = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
+        if (-not $usernameText -or -not $passwordText) {
+            throw 'VPN username and password are required.'
+        }
+
+        New-Item -ItemType Directory -Force -Path 'secrets' | Out-Null
+        $acl = [Security.AccessControl.DirectorySecurity]::new()
+        $acl.SetAccessRuleProtection($true, $false)
+        $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+        foreach ($sid in @(
+            [Security.Principal.WindowsIdentity]::GetCurrent().User,
+            [Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
+            [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+        )) {
+            $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+                $sid,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                $inheritance,
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow
+            )
+            $acl.AddAccessRule($rule)
+        }
+        Set-Acl -Path 'secrets' -AclObject $acl
+
+        $encoding = [Text.UTF8Encoding]::new($false)
+        [IO.File]::WriteAllText((Join-Path $PWD 'secrets\openvpn_user'), $usernameText, $encoding)
+        [IO.File]::WriteAllText((Join-Path $PWD 'secrets\openvpn_password'), $passwordText, $encoding)
+    }
+    finally {
+        if ($usernamePointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($usernamePointer) }
+        if ($passwordPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
+        $username.Dispose()
+        $password.Dispose()
+        Remove-Variable usernameText, passwordText -ErrorAction SilentlyContinue
+        Remove-Item Env:NORD_USER, Env:NORD_PASS, Env:VPN_USER, Env:VPN_PASS -ErrorAction SilentlyContinue
+    }
+
+    Write-Host 'VPN secret files created with no trailing newline.'
 }
 
 function Get-ArrApiKey {
@@ -111,16 +179,6 @@ function Invoke-Recyclarr {
     $env:SONARR_API_KEY = Get-ArrApiKey 'config\sonarr\config.xml' 'Sonarr'
     $env:RADARR_API_KEY = Get-ArrApiKey 'config\radarr\config.xml' 'Radarr'
 
-    # Compose interpolates the whole file even for a single service, and
-    # Gluetun requires VPN credentials. Recyclarr never touches Gluetun, so
-    # placeholders are enough to satisfy interpolation.
-    $hadNordUser = [bool]$env:NORD_USER
-    $hadNordPass = [bool]$env:NORD_PASS
-    $previousNordUser = $env:NORD_USER
-    $previousNordPass = $env:NORD_PASS
-    if (-not $hadNordUser) { $env:NORD_USER = '__recyclarr_placeholder__' }
-    if (-not $hadNordPass) { $env:NORD_PASS = '__recyclarr_placeholder__' }
-
     try {
         if ($Preview) {
             docker compose run --rm recyclarr sync --preview
@@ -132,8 +190,6 @@ function Invoke-Recyclarr {
     finally {
         Remove-Item Env:SONARR_API_KEY -ErrorAction SilentlyContinue
         Remove-Item Env:RADARR_API_KEY -ErrorAction SilentlyContinue
-        if ($hadNordUser) { $env:NORD_USER = $previousNordUser } else { Remove-Item Env:NORD_USER -ErrorAction SilentlyContinue }
-        if ($hadNordPass) { $env:NORD_PASS = $previousNordPass } else { Remove-Item Env:NORD_PASS -ErrorAction SilentlyContinue }
     }
 }
 
@@ -158,12 +214,17 @@ function Invoke-Doctor {
     $composeFile = Get-ActiveComposeFile
     Write-Check '.env exists' (Test-Path '.env')
     Write-Check 'active compose target' ([bool]$composeFile) $composeFile
-    $hasNordUser = [bool]$env:NORD_USER
-    $hasNordPass = [bool]$env:NORD_PASS
     $hasTsAuthKey = [bool]$env:TS_AUTHKEY
     $tailscaleEnabled = $composeFile -match 'linux' -or (Get-EnvFileValue 'COMPOSE_PROFILES') -match '(^|[,;\s])tailscale([,;\s]|$)'
-    Write-Check 'NORD_USER set' $hasNordUser
-    Write-Check 'NORD_PASS set' $hasNordPass
+    Write-Check 'VPN secrets overlay' ($composeFile -match 'compose[/\\]secrets\.yml') $(if ($composeFile -match 'compose[/\\]secrets\.yml') { '' } else { 'add compose\secrets.yml to COMPOSE_FILE' })
+    foreach ($path in @('secrets\openvpn_user', 'secrets\openvpn_password')) {
+        $valid = $false
+        if ((Test-Path $path) -and (Get-Item $path).Length -gt 0) {
+            $bytes = [IO.File]::ReadAllBytes($path)
+            $valid = $bytes -notcontains 10 -and $bytes -notcontains 13
+        }
+        Write-Check $path $valid $(if ($valid) { '' } else { 'run .\stack.ps1 init-vpn' })
+    }
     if ($tailscaleEnabled) {
         Write-Check 'TS_AUTHKEY set' $hasTsAuthKey
     }
@@ -171,11 +232,7 @@ function Invoke-Doctor {
         Write-Check "$secretName set" ([bool][Environment]::GetEnvironmentVariable($secretName))
     }
 
-    $previousNordUser = $env:NORD_USER
-    $previousNordPass = $env:NORD_PASS
     $previousTsAuthKey = $env:TS_AUTHKEY
-    if (-not $hasNordUser) { $env:NORD_USER = '__doctor_placeholder__' }
-    if (-not $hasNordPass) { $env:NORD_PASS = '__doctor_placeholder__' }
     if ($tailscaleEnabled -and -not $hasTsAuthKey) { $env:TS_AUTHKEY = '__doctor_placeholder__' }
 
     try {
@@ -219,8 +276,6 @@ function Invoke-Doctor {
         }
     }
     finally {
-        if ($hasNordUser) { $env:NORD_USER = $previousNordUser } else { Remove-Item Env:NORD_USER -ErrorAction SilentlyContinue }
-        if ($hasNordPass) { $env:NORD_PASS = $previousNordPass } else { Remove-Item Env:NORD_PASS -ErrorAction SilentlyContinue }
         if ($hasTsAuthKey) { $env:TS_AUTHKEY = $previousTsAuthKey } else { Remove-Item Env:TS_AUTHKEY -ErrorAction SilentlyContinue }
     }
 }
@@ -317,6 +372,9 @@ switch ($Command) {
         Copy-Item $template '.env' -Force
         Write-Host "Switched target to $Arg (.env replaced from $template)"
     }
+    'init-vpn' {
+        Initialize-VpnSecrets
+    }
     'init-windows' {
         $distro = if ($Arg) { $Arg } else { 'Ubuntu' }
         if ($Option) {
@@ -328,7 +386,8 @@ switch ($Command) {
     }
     'up' {
         Test-DockerEngine
-        Test-SecretEnvironment
+        Test-RuntimeSecrets
+        Test-VpnSecrets
         docker compose up -d
     }
     'down' {
@@ -391,7 +450,8 @@ switch ($Command) {
     }
     'config' {
         Test-DockerEngine
-        Test-SecretEnvironment
+        Test-RuntimeSecrets
+        Test-VpnSecrets
         docker compose config |
             ForEach-Object {
                 $_ -replace '(OPENVPN_PASSWORD:\s*).+', '$1<redacted>' `
@@ -411,7 +471,8 @@ switch ($Command) {
     }
     'pull' {
         Test-DockerEngine
-        Test-SecretEnvironment
+        Test-RuntimeSecrets
+        Test-VpnSecrets
         docker compose pull
         docker compose up -d
         docker image prune -f
@@ -428,7 +489,8 @@ switch ($Command) {
     }
     'verify' {
         Test-DockerEngine
-        Test-SecretEnvironment
+        Test-RuntimeSecrets
+        Test-VpnSecrets
         $gluetunContainerId = (docker compose ps -q gluetun).Trim()
         if (-not $gluetunContainerId) {
             throw 'Gluetun is not running. Start the stack first with .\stack.ps1 up.'
@@ -439,6 +501,13 @@ switch ($Command) {
             docker compose logs --tail=40 gluetun
             throw "Gluetun is $gluetunHealth. Fix the tunnel first, then run verify again."
         }
+
+        $exposedVpnEnvironment = docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' $gluetunContainerId |
+            Where-Object { $_ -match '^(OPENVPN_(USER|PASSWORD)|VPN_(USER|PASS))=.+' }
+        if ($exposedVpnEnvironment) {
+            throw 'FAIL: Gluetun has non-empty VPN credentials in its environment. Recreate it with compose\secrets.yml enabled.'
+        }
+        Write-Host 'PASS: Gluetun inspect data contains no VPN credential values.'
 
         $hostIp = Get-PublicIp @('https://ipinfo.io/ip', 'https://api.ipify.org')
         $vpnIp = (docker compose exec -T gluetun sh -lc "wget -T 10 -qO- https://ipinfo.io/ip 2>/dev/null || wget -T 10 -qO- https://api.ipify.org 2>/dev/null || wget -T 10 -qO- http://ipinfo.io/ip 2>/dev/null || true").Trim()

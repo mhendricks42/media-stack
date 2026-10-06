@@ -5,6 +5,7 @@ usage() {
   cat <<'EOF'
 Usage:
   ./stack.sh use <linux|windows>
+  ./stack.sh init-vpn
   ./stack.sh up|down|ps|pull|config
   ./stack.sh setup-data
   source ./scripts/set-env.sh [--include-tailscale]
@@ -28,15 +29,13 @@ need_arg() {
   fi
 }
 
-check_secret_environment() {
-  missing=()
-  compose_file="${COMPOSE_FILE:-}"
+check_runtime_secrets() {
+  local missing=()
+  local compose_file="${COMPOSE_FILE:-}"
   if [[ -z "$compose_file" && -f .env ]]; then
     compose_file="$(awk -F= '$1 == "COMPOSE_FILE" {print $2; exit}' .env)"
   fi
 
-  [[ -n "${NORD_USER:-}" ]] || missing+=("NORD_USER")
-  [[ -n "${NORD_PASS:-}" ]] || missing+=("NORD_PASS")
   if [[ "$compose_file" == *linux* && -z "${TS_AUTHKEY:-}" ]]; then
     missing+=("TS_AUTHKEY")
   fi
@@ -46,6 +45,51 @@ check_secret_environment() {
     echo "Set them in this shell or inject them from a secret manager; do not save them in .env."
     exit 1
   fi
+}
+
+check_vpn_secrets() {
+  local compose_file
+  local path
+  compose_file="$(get_active_compose_file)"
+
+  if [[ "$compose_file" != *compose/secrets.yml* ]]; then
+    echo "compose/secrets.yml is missing from COMPOSE_FILE. Run ./stack.sh use linux or add the overlay to .env." >&2
+    return 1
+  fi
+
+  for path in secrets/openvpn_user secrets/openvpn_password; do
+    if [[ ! -s "$path" ]]; then
+      echo "Missing or empty VPN secret: $path. Run ./stack.sh init-vpn." >&2
+      return 1
+    fi
+    if ! LC_ALL=C tr -d '\r\n' < "$path" | cmp -s - "$path"; then
+      echo "VPN secret contains a newline: $path. Recreate it with ./stack.sh init-vpn; do not use echo." >&2
+      return 1
+    fi
+  done
+}
+
+init_vpn_secrets() {
+  local vpn_user
+  local vpn_password
+
+  read -r -s -p "NordVPN OpenVPN/manual username: " vpn_user
+  echo
+  read -r -s -p "NordVPN OpenVPN/manual password: " vpn_password
+  echo
+
+  if [[ -z "$vpn_user" || -z "$vpn_password" ]]; then
+    echo "VPN username and password are required." >&2
+    return 1
+  fi
+
+  mkdir -p secrets
+  chmod 700 secrets
+  printf '%s' "$vpn_user" > secrets/openvpn_user
+  printf '%s' "$vpn_password" > secrets/openvpn_password
+  chmod 600 secrets/openvpn_user secrets/openvpn_password
+  unset vpn_user vpn_password NORD_USER NORD_PASS VPN_USER VPN_PASS
+  echo "VPN secret files created with no trailing newline."
 }
 
 check_docker_engine() {
@@ -148,12 +192,6 @@ run_recyclarr() {
   RADARR_API_KEY="$(get_arr_api_key config/radarr/config.xml Radarr)"
   export SONARR_API_KEY RADARR_API_KEY
 
-  # Compose interpolates the whole file even for a single service, and Gluetun
-  # requires VPN credentials. Recyclarr never touches Gluetun, so placeholders
-  # are enough to satisfy interpolation.
-  export NORD_USER="${NORD_USER:-__recyclarr_placeholder__}"
-  export NORD_PASS="${NORD_PASS:-__recyclarr_placeholder__}"
-
   if [[ "$preview" == "--preview" ]]; then
     docker compose run --rm recyclarr sync --preview
   else
@@ -172,15 +210,17 @@ doctor() {
   if [[ -f .env ]]; then write_check ".env exists" 0; else write_check ".env exists" 1; fi
   if [[ -n "$compose_file" ]]; then write_check "active compose target" 0 "$compose_file"; else write_check "active compose target" 1; fi
 
-  had_nord_user=0
-  had_nord_pass=0
   had_ts_authkey=0
-  [[ -n "${NORD_USER:-}" ]] && had_nord_user=1
-  [[ -n "${NORD_PASS:-}" ]] && had_nord_pass=1
   [[ -n "${TS_AUTHKEY:-}" ]] && had_ts_authkey=1
 
-  if (( had_nord_user )); then write_check "NORD_USER set" 0; else write_check "NORD_USER set" 1; export NORD_USER="__doctor_placeholder__"; fi
-  if (( had_nord_pass )); then write_check "NORD_PASS set" 0; else write_check "NORD_PASS set" 1; export NORD_PASS="__doctor_placeholder__"; fi
+  if [[ "$compose_file" == *compose/secrets.yml* ]]; then write_check "VPN secrets overlay" 0; else write_check "VPN secrets overlay" 1 "add compose/secrets.yml to COMPOSE_FILE"; fi
+  for vpn_secret in secrets/openvpn_user secrets/openvpn_password; do
+    if [[ -s "$vpn_secret" ]] && LC_ALL=C tr -d '\r\n' < "$vpn_secret" | cmp -s - "$vpn_secret"; then
+      write_check "$vpn_secret" 0
+    else
+      write_check "$vpn_secret" 1 "run ./stack.sh init-vpn"
+    fi
+  done
   if [[ "$compose_file" == *linux* ]]; then
     if (( had_ts_authkey )); then write_check "TS_AUTHKEY set" 0; else write_check "TS_AUTHKEY set" 1; export TS_AUTHKEY="__doctor_placeholder__"; fi
   fi
@@ -216,8 +256,6 @@ doctor() {
     if curl -fsSL --max-time 5 "$endpoint" >/dev/null 2>&1; then write_check "reachable $endpoint" 0; else write_check "reachable $endpoint" 1; fi
   done
 
-  if (( ! had_nord_user )); then unset NORD_USER; fi
-  if (( ! had_nord_pass )); then unset NORD_PASS; fi
   if (( ! had_ts_authkey )); then unset TS_AUTHKEY; fi
 }
 
@@ -236,9 +274,13 @@ case "$cmd" in
     cp "$src" .env
     echo "Switched target to $arg (.env replaced from $src)"
     ;;
+  init-vpn)
+    init_vpn_secrets
+    ;;
   up)
     check_docker_engine
-    check_secret_environment
+    check_runtime_secrets
+    check_vpn_secrets
     docker compose up -d
     ;;
   down)
@@ -299,7 +341,8 @@ case "$cmd" in
     ;;
   config)
     check_docker_engine
-    check_secret_environment
+    check_runtime_secrets
+    check_vpn_secrets
     docker compose config | sed -E 's/(OPENVPN_PASSWORD:[[:space:]]*).+/\1<redacted>/; s/(OPENVPN_USER:[[:space:]]*).+/\1<redacted>/; s/(TS_AUTHKEY:[[:space:]]*).+/\1<redacted>/'
     ;;
   logs)
@@ -314,14 +357,16 @@ case "$cmd" in
     ;;
   pull)
     check_docker_engine
-    check_secret_environment
+    check_runtime_secrets
+    check_vpn_secrets
     docker compose pull
     docker compose up -d
     docker image prune -f
     ;;
   verify)
     check_docker_engine
-    check_secret_environment
+    check_runtime_secrets
+    check_vpn_secrets
     gluetun_container_id="$(docker compose ps -q gluetun)"
     if [[ -z "$gluetun_container_id" ]]; then
       echo "Gluetun is not running. Start the stack first with ./stack.sh up."
@@ -334,6 +379,13 @@ case "$cmd" in
       echo "Gluetun is $gluetun_health. Fix the tunnel first, then run verify again."
       exit 1
     fi
+
+    exposed_vpn_env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$gluetun_container_id" | grep -E '^(OPENVPN_(USER|PASSWORD)|VPN_(USER|PASS))=.+' || true)"
+    if [[ -n "$exposed_vpn_env" ]]; then
+      echo "FAIL: Gluetun has non-empty VPN credentials in its environment. Recreate it with compose/secrets.yml enabled."
+      exit 1
+    fi
+    echo "PASS: Gluetun inspect data contains no VPN credential values."
 
     host_ip="$(public_ip | tr -d '[:space:]')"
     vpn_ip="$(docker compose exec -T gluetun sh -lc 'wget -T 10 -qO- https://ipinfo.io/ip 2>/dev/null || wget -T 10 -qO- https://api.ipify.org 2>/dev/null || wget -T 10 -qO- http://ipinfo.io/ip 2>/dev/null || true' | tr -d '[:space:]')"

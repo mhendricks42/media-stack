@@ -107,7 +107,7 @@ if ($LASTEXITCODE -ne 0 -or $linuxId.Count -lt 2) {
 }
 
 Set-DotEnvValue '.env' 'COMPOSE_PROJECT_NAME' 'media-dev'
-Set-DotEnvValue '.env' 'COMPOSE_FILE' 'docker-compose.yml;compose/windows.yml'
+Set-DotEnvValue '.env' 'COMPOSE_FILE' 'docker-compose.yml;compose/windows.yml;compose/secrets.yml'
 Set-DotEnvValue '.env' 'COMPOSE_PATH_SEPARATOR' ';'
 Set-DotEnvValue '.env' 'COMPOSE_PROFILES' 'tailscale'
 Set-DotEnvValue '.env' 'BIND_ADDR' '127.0.0.1'

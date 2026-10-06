@@ -27,12 +27,9 @@ services:
       - ${BIND_ADDR:?Set BIND_ADDR in .env}:6881:6881/udp
     volumes:
       - ./config/gluetun:/gluetun
-      - ./secrets:/secrets:ro
     environment:
       - VPN_SERVICE_PROVIDER=nordvpn
       - VPN_TYPE=openvpn
-      - OPENVPN_USER_FILE=/secrets/vpn_user
-      - OPENVPN_PASSWORD_FILE=/secrets/vpn_password
       - SERVER_COUNTRIES=${VPN_COUNTRY:?Set VPN_COUNTRY in .env}
       - SERVER_HOSTNAMES=${VPN_HOSTNAME:-}
       - TZ=${TZ:?Set TZ in .env}

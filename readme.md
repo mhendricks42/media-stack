@@ -83,14 +83,14 @@ Two network domains live on one host and never talk over the network the way you
 Docker Compose reads the `COMPOSE_FILE` variable from `.env`. Set it there and plain `docker compose up -d` picks up the right overlays with no flags:
 
 ```
-COMPOSE_FILE=docker-compose.yml:compose/linux.yml
+COMPOSE_FILE=docker-compose.yml:compose/linux.yml:compose/secrets.yml
 COMPOSE_PROJECT_NAME=media
 ```
 
 On Windows, use `;` as the path separator instead:
 
 ```
-COMPOSE_FILE=docker-compose.yml;compose/windows.yml
+COMPOSE_FILE=docker-compose.yml;compose/windows.yml;compose/secrets.yml
 COMPOSE_PROJECT_NAME=media-dev
 ```
 
@@ -115,13 +115,13 @@ They are separate files rather than commented blocks, because a `devices:` entry
 
 ```bash
 ls -la /dev/dri                                # Intel: must list renderD128
-COMPOSE_FILE=docker-compose.yml:compose/linux.yml:compose/gpu-intel.yml
+COMPOSE_FILE=docker-compose.yml:compose/linux.yml:compose/secrets.yml:compose/gpu-intel.yml
 ```
 
 On Windows, the equivalent separator is `;`:
 
 ```powershell
-$env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/gpu-nvidia.yml'
+$env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/secrets.yml;compose/gpu-nvidia.yml'
 ```
 
 ## Repository layout
@@ -132,6 +132,7 @@ $env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/gpu-nvidia.yml
 ├── compose/
 │   ├── linux.yml               # prod: Tailscale
 │   ├── windows.yml             # dev: optional userspace Tailscale node
+│   ├── secrets.yml             # VPN credentials as container secret files
 │   ├── gpu-intel.yml           # optional: QuickSync
 │   └── gpu-nvidia.yml          # optional: NVENC
 ├── env/
@@ -178,6 +179,7 @@ source ./scripts/set-env.sh
 For Linux production, include the Tailscale auth key prompt:
 
 ```bash
+./stack.sh init-vpn
 source ./scripts/set-env.sh --include-tailscale
 ```
 
@@ -197,10 +199,8 @@ Use `--force` to replace values already set in the current shell:
 source ./scripts/set-env.sh --force
 ```
 
-The helper prompts for:
+Run `./stack.sh init-vpn` or `.\stack.ps1 init-vpn` separately for NordVPN credentials. The session helper prompts for:
 
-- `NORD_USER`
-- `NORD_PASS`
 - `QBIT_PASS` for bootstrap automation
 - `SABNZBD_USER` / `SABNZBD_PASS`
 - optional `ANIMETOSHO_API_KEY`, `NZBGEEK_API_KEY`, and `NZBPLANET_API_KEY` for enabled indexers in `indexers.json`
@@ -244,7 +244,7 @@ source ./scripts/set-env.sh --include-tailscale
 mkdir -p config/seerr && sudo chown -R 1000:1000 config/seerr
 ```
 
-Seerr always runs as UID 1000 regardless of `PUID`, so its config directory needs that owner explicitly. Keep the same terminal open after `set-env.sh`; the secrets live only in that shell session.
+`init-vpn` stores the Nord OpenVPN credentials in ignored files with no trailing newline and restrictive Linux permissions. Seerr always runs as UID 1000 regardless of `PUID`, so its config directory needs that owner explicitly. Keep the same terminal open after `set-env.sh`; the remaining bootstrap and Tailscale secrets live only in that shell session.
 
 **4. Check the merged file before starting.** This catches typos and missing variables without creating anything:
 
@@ -637,7 +637,7 @@ Back up before upgrading. `./stack.sh backup` or `.\stack.ps1 backup` stops the 
 
 **Gluetun healthcheck flapping.** Usually a bad VPN server. Change `VPN_COUNTRY` and restart. Check `./stack.sh logs gluetun` for the actual error before changing anything else.
 
-**Gluetun logs show `AUTH_FAILED`.** The VPN provider rejected the credentials passed through `NORD_USER` and `NORD_PASS`. For NordVPN, use the manual/service credentials for OpenVPN, not necessarily the email/password you use for the website or app. Set them as shell environment variables, restart Gluetun, then run `verify` again.
+**Gluetun logs show `AUTH_FAILED`.** The VPN provider rejected `secrets/openvpn_user` or `secrets/openvpn_password`. For NordVPN, use the manual/service credentials for OpenVPN, not necessarily the email/password you use for the website or app. Rerun `./stack.sh init-vpn` (or `.\stack.ps1 init-vpn`), recreate Gluetun, then run `verify` again. Do not create these files with `echo`; its trailing newline becomes part of the credential.
 
 **Subnet route works at home, breaks at a cafe.** Subnet collision — the cafe's network uses the same range you advertised, and the local route wins. This is why `linux.env.example` suggests `10.73.42.0/24` rather than `192.168.1.0/24`. Renumbering later is annoying; do it before you have static leases.
 
