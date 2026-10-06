@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 ########################################################################
 # Configure Seerr with Sonarr/Radarr services and quality profiles
@@ -12,14 +12,15 @@
 # Called from bootstrap.sh after Seerr is initialized.
 ########################################################################
 
-set -e
+set -euo pipefail
 
 SONARR_EXTERNAL_URL="${1:-http://localhost:8989}"
 RADARR_EXTERNAL_URL="${2:-http://localhost:7878}"
 
 wait_seerr_healthy() {
     local timeout=120
-    local deadline=$(($(date +%s) + timeout))
+    local deadline
+    deadline=$(($(date +%s) + timeout))
 
     while [ "$(date +%s)" -lt "$deadline" ]; do
         if curl -sf http://localhost:5055/api/v1/status &>/dev/null; then
@@ -41,8 +42,7 @@ get_api_key_from_config() {
         return 1
     fi
 
-    # Extract ApiKey from XML using sed
-    grep -oP '(?<=<ApiKey>)[^<]+' "$path" | head -1
+    sed -n 's:.*<ApiKey>\([^<]*\)</ApiKey>.*:\1:p' "$path" | head -n 1
 }
 
 get_arr_quality_profiles() {
@@ -62,7 +62,8 @@ find_profile_id() {
     local names=("$@")
 
     for name in "${names[@]}"; do
-        local id=$(echo "$profiles" | jq -r ".[] | select(.name == \"$name\") | .id" | head -1)
+        local id
+        id="$(jq -r --arg name "$name" '.[] | select(.name == $name) | .id' <<<"$profiles" | head -n 1)"
         if [ -n "$id" ] && [ "$id" != "null" ]; then
             echo "$id"
             return 0
@@ -70,14 +71,14 @@ find_profile_id() {
     done
 
     # Default to first profile
-    echo "$profiles" | jq -r '.[0].id'
+    jq -r '.[0].id' <<<"$profiles"
 }
 
 get_profile_name() {
     local profiles="$1"
     local id="$2"
 
-    echo "$profiles" | jq -r ".[] | select(.id == $id) | .name" | head -1
+    jq -r --argjson id "$id" '.[] | select(.id == $id) | .name' <<<"$profiles" | head -n 1
 }
 
 update_seerr_settings() {
@@ -92,23 +93,33 @@ update_seerr_settings() {
         return 1
     fi
 
-    # Backup and update
     cp "$settings_path" "$settings_path.bak"
 
     if [ "$service" = "sonarr" ]; then
         jq --arg api_key "$api_key" --arg profile_id "$profile_id" --arg profile_name "$profile_name" \
-            '.sonarr[0].apiKey = $api_key |
-             .sonarr[0].activeProfileId = ($profile_id | tonumber) |
-             .sonarr[0].activeProfileName = $profile_name |
-             .sonarr[0].activeAnimeProfileId = ($profile_id | tonumber) |
-             .sonarr[0].activeAnimeProfileName = $profile_name' \
+            '.sonarr = (if (.sonarr | length) == 0 then [{}] else .sonarr end) |
+             .sonarr[0] += {
+               name: "Sonarr", hostname: "sonarr", port: 8989, apiKey: $api_key,
+               useSsl: false, activeProfileId: ($profile_id | tonumber),
+               activeProfileName: $profile_name, activeDirectory: "/data/media/tv",
+               activeAnimeProfileId: ($profile_id | tonumber),
+               activeAnimeProfileName: $profile_name, activeAnimeDirectory: "/data/media/tv",
+               tags: [], animeTags: [], is4k: false, isDefault: true,
+               enableSeasonFolders: true, syncEnabled: true, preventSearch: false,
+               tagRequests: false, monitorNewItems: "all", id: 0
+             }' \
             "$settings_path" > "$settings_path.tmp" && mv "$settings_path.tmp" "$settings_path"
         echo "Updated Seerr Sonarr config: profile $profile_id ($profile_name)"
     elif [ "$service" = "radarr" ]; then
         jq --arg api_key "$api_key" --arg profile_id "$profile_id" --arg profile_name "$profile_name" \
-            '.radarr[0].apiKey = $api_key |
-             .radarr[0].activeProfileId = ($profile_id | tonumber) |
-             .radarr[0].activeProfileName = $profile_name' \
+            '.radarr = (if (.radarr | length) == 0 then [{}] else .radarr end) |
+             .radarr[0] += {
+               name: "Radarr", hostname: "radarr", port: 7878, apiKey: $api_key,
+               useSsl: false, activeProfileId: ($profile_id | tonumber),
+               activeProfileName: $profile_name, activeDirectory: "/data/media/movies",
+               is4k: false, minimumAvailability: "released", tags: [], isDefault: true,
+               syncEnabled: true, preventSearch: false, tagRequests: false, id: 0
+             }' \
             "$settings_path" > "$settings_path.tmp" && mv "$settings_path.tmp" "$settings_path"
         echo "Updated Seerr Radarr config: profile $profile_id ($profile_name)"
     fi
@@ -119,6 +130,22 @@ update_seerr_settings() {
 echo "Configuring Seerr with Sonarr and Radarr..."
 
 wait_seerr_healthy || exit 1
+
+settings_path='./config/seerr/settings.json'
+if [ ! -f "$settings_path" ]; then
+    echo "ERROR: Missing Seerr settings file: $settings_path"
+    exit 1
+fi
+if ! jq -e '.main.apiKey? | strings | length > 0' "$settings_path" >/dev/null; then
+    seerr_api_key="$(python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(48)).decode())')"
+    cp "$settings_path" "$settings_path.bak"
+    jq --arg key "$seerr_api_key" '.main = (.main // {}) | .main.apiKey = $key' \
+        "$settings_path" > "$settings_path.tmp" && mv "$settings_path.tmp" "$settings_path"
+    unset seerr_api_key
+    echo "Seerr API key generated. Backup: $settings_path.bak"
+else
+    echo "Seerr API key verified."
+fi
 
 sonarr_api_key=$(get_api_key_from_config './config/sonarr/config.xml') || exit 1
 radarr_api_key=$(get_api_key_from_config './config/radarr/config.xml') || exit 1
@@ -133,8 +160,8 @@ radarr_profiles=$(get_arr_quality_profiles "$RADARR_EXTERNAL_URL" "$radarr_api_k
 radarr_profile_id=$(find_profile_id "$radarr_profiles" "HD Bluray + WEB" "HD-1080p" "Remux-1080p") || exit 1
 radarr_profile_name=$(get_profile_name "$radarr_profiles" "$radarr_profile_id") || exit 1
 
-update_seerr_settings './config/seerr/settings.json' 'sonarr' "$sonarr_profile_id" "$sonarr_profile_name" "$sonarr_api_key" || exit 1
-update_seerr_settings './config/seerr/settings.json' 'radarr' "$radarr_profile_id" "$radarr_profile_name" "$radarr_api_key" || exit 1
+update_seerr_settings "$settings_path" 'sonarr' "$sonarr_profile_id" "$sonarr_profile_name" "$sonarr_api_key" || exit 1
+update_seerr_settings "$settings_path" 'radarr' "$radarr_profile_id" "$radarr_profile_name" "$radarr_api_key" || exit 1
 
 echo "Seerr bootstrap complete. Restart Seerr to reload settings:"
 echo "  docker compose restart seerr"

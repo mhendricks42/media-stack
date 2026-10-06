@@ -139,7 +139,8 @@ $env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/secrets.yml;co
 │   ├── linux.env.example
 │   └── windows.env.example
 ├── scripts/
-│   ├── bootstrap.ps1          # app integrations and qBittorrent setup
+│   ├── bootstrap.sh           # Linux app integrations and setup
+│   ├── bootstrap.ps1          # Windows app integrations and setup
 │   ├── bootstrap-ui-auth.ps1  # UI login provisioning and verification
 │   ├── init-windows-dev.ps1   # WSL data path prep for Windows development
 │   ├── import-prowlarr-indexers.ps1
@@ -158,7 +159,7 @@ $env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/secrets.yml;co
 
 **Both targets:** Docker Engine 24+ with the Compose plugin. A Usenet provider account for SABnzbd, plus NZB indexer accounts such as OZnzb, DrunkenSlug, or NZBGeek if you use private indexers. A VPN account is still needed for the secondary torrent path; this repo assumes NordVPN. Note that Nord's consumer service does not offer port forwarding, so torrent seeding will rely on outbound connections only.
 
-**Linux:** any distro with Docker. An Intel CPU with QuickSync if you expect to transcode. A Tailscale account. Install PowerShell 7 (`pwsh`) to use `bootstrap` and `import-indexers`; it keeps those automation commands identical on both platforms.
+**Linux:** any distro with Docker, Bash, curl, jq, and Python 3. An Intel CPU with QuickSync if you expect to transcode. A Tailscale account. Bootstrap and indexer import are implemented natively for Linux; PowerShell is not required.
 
 **Windows:** Docker Desktop with the WSL2 backend, plus a real WSL distro such as Ubuntu. Read [the Windows section](#setup-windows-development) before you start — the default of putting data on `C:` does not work. The optional containerized Tailscale node requires a Tailscale auth key supplied in the shell environment.
 
@@ -252,7 +253,7 @@ mkdir -p config/seerr && sudo chown -R 1000:1000 config/seerr
 ./stack.sh config | less
 ```
 
-**5. Start, generate app configs, then bootstrap.** The first `up` creates each application's config files and API keys. `setup-data` creates the shared data tree. `bootstrap` then configures UI logins, SABnzbd paths, qBittorrent paths/seeding limits, Prowlarr app links, download clients, and root folders.
+**5. Start, generate app configs, then bootstrap.** The first `up` creates each application's config files and API keys. `setup-data` creates missing shared-data directories with the configured `PUID` and `PGID`; it never changes ownership of existing directories or media. `bootstrap` then configures UI logins, SABnzbd paths, qBittorrent paths/seeding limits, Prowlarr app links, download clients, and root folders.
 
 ```bash
 ./stack.sh up

@@ -304,40 +304,58 @@ case "$cmd" in
     ;;
   setup-data)
     check_docker_engine
-    docker compose exec -T sonarr sh -lc "mkdir -p /data/usenet/incomplete /data/usenet/complete/tv /data/usenet/complete/movies /data/torrents/incomplete /data/media/tv /data/media/movies; chown -R 1000:1000 /data/usenet /data/torrents /data/media; ls -la /data; ls -la /data/usenet; ls -la /data/media"
+    docker compose exec -T sonarr sh -lc '
+      set -eu
+      : "${PUID:?PUID is not set in the Sonarr container}"
+      : "${PGID:?PGID is not set in the Sonarr container}"
+
+      for path in \
+        /data/usenet \
+        /data/usenet/incomplete \
+        /data/usenet/complete \
+        /data/usenet/complete/tv \
+        /data/usenet/complete/movies \
+        /data/torrents \
+        /data/torrents/incomplete \
+        /data/media \
+        /data/media/tv \
+        /data/media/movies
+      do
+        if [ -d "$path" ]; then
+          echo "Keeping existing directory: $path"
+        else
+          mkdir "$path"
+          chown "$PUID:$PGID" "$path"
+          echo "Created directory: $path ($PUID:$PGID)"
+        fi
+      done
+
+      ls -la /data
+      ls -la /data/usenet
+      ls -la /data/media
+    '
     ;;
   bootstrap)
     check_docker_engine
-    if ! command -v pwsh >/dev/null 2>&1; then
-      echo "PowerShell 7 (pwsh) is required for bootstrap on Linux. Install pwsh, then run ./stack.sh bootstrap."
-      exit 1
-    fi
-    pwsh ./scripts/bootstrap.ps1
+    bash ./scripts/bootstrap.sh
     ;;
   import-indexers)
     check_docker_engine
-    if ! command -v pwsh >/dev/null 2>&1; then
-      echo "PowerShell 7 (pwsh) is required for import-indexers on Linux. Install pwsh or run scripts/import-prowlarr-indexers.ps1 from Windows."
+    config_path="$arg"
+    dry_run=0
+    if [[ "$arg" == "--dry-run" ]]; then
+      config_path=""
+      dry_run=1
+    elif [[ "$option" == "--dry-run" ]]; then
+      dry_run=1
+    elif [[ -n "$option" ]]; then
+      echo "Unknown import-indexers option: $option"
       exit 1
     fi
-    dry_run=""
-    config_path="$arg"
-    if [[ "$arg" == "--dry-run" ]]; then
-      dry_run="-DryRun"
-      config_path=""
-    elif [[ "$option" == "--dry-run" ]]; then
-      dry_run="-DryRun"
-    fi
-    if [[ -n "$config_path" ]]; then
-      if [[ -n "$dry_run" ]]; then
-        pwsh ./scripts/import-prowlarr-indexers.ps1 -ConfigPath "$config_path" -DryRun
-      else
-        pwsh ./scripts/import-prowlarr-indexers.ps1 -ConfigPath "$config_path"
-      fi
-    elif [[ -n "$dry_run" ]]; then
-      pwsh ./scripts/import-prowlarr-indexers.ps1 -DryRun
+    if ((dry_run)); then
+      bash ./scripts/bootstrap.sh import-indexers "${config_path:-indexers.json}" --dry-run
     else
-      pwsh ./scripts/import-prowlarr-indexers.ps1
+      bash ./scripts/bootstrap.sh import-indexers "${config_path:-indexers.json}"
     fi
     ;;
   sync-profiles)

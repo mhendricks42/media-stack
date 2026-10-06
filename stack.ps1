@@ -400,7 +400,40 @@ switch ($Command) {
     }
     'setup-data' {
         Test-DockerEngine
-        docker compose exec -T sonarr sh -lc "mkdir -p /data/usenet/incomplete /data/usenet/complete/tv /data/usenet/complete/movies /data/torrents/incomplete /data/media/tv /data/media/movies; chown -R 1000:1000 /data/usenet /data/torrents /data/media; ls -la /data; ls -la /data/usenet; ls -la /data/media"
+        $setupDataScript = @'
+set -eu
+: "${PUID:?PUID is not set in the Sonarr container}"
+: "${PGID:?PGID is not set in the Sonarr container}"
+
+for path in \
+  /data/usenet \
+  /data/usenet/incomplete \
+  /data/usenet/complete \
+  /data/usenet/complete/tv \
+  /data/usenet/complete/movies \
+  /data/torrents \
+  /data/torrents/incomplete \
+  /data/media \
+  /data/media/tv \
+  /data/media/movies
+do
+  if [ -d "$path" ]; then
+    echo "Keeping existing directory: $path"
+  else
+    mkdir "$path"
+    chown "$PUID:$PGID" "$path"
+    echo "Created directory: $path ($PUID:$PGID)"
+  fi
+done
+
+ls -la /data
+ls -la /data/usenet
+ls -la /data/media
+'@
+        docker compose exec -T sonarr sh -lc $setupDataScript
+        if ($LASTEXITCODE -ne 0) {
+            throw "Data directory setup failed with exit code $LASTEXITCODE."
+        }
     }
     'env' {
         if ($Arg -eq '--include-tailscale') {
