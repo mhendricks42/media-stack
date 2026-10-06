@@ -98,8 +98,19 @@ check_docker_engine() {
     exit 1
   fi
 
-  if docker info >/dev/null 2>&1; then
+  local docker_error
+  if docker_error="$(docker info 2>&1)"; then
     return 0
+  fi
+
+  if [[ "$docker_error" == *"permission denied"* ]]; then
+    echo "Docker is running, but the current user cannot access its socket."
+    if [[ -S /var/run/docker.sock ]]; then
+      echo "Socket permissions: $(ls -l /var/run/docker.sock)"
+    fi
+    echo "Add the current user to the socket's group, then sign out and back in."
+    echo "For a socket owned by the docker group: sudo usermod -aG docker \"\$USER\""
+    exit 1
   fi
 
   if [[ -z "${MEDIA_STACK_NO_DOCKER_AUTOSTART:-}" ]] && command -v systemctl >/dev/null 2>&1; then
