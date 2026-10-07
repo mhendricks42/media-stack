@@ -244,6 +244,32 @@ function Set-IniValue {
     return $sectionRegex.Replace($Content, $evaluator, 1)
 }
 
+function Add-IniListValue {
+    param(
+        [string]$Content,
+        [string]$Section,
+        [string]$Key,
+        [string]$Value
+    )
+
+    $escapedSection = [regex]::Escape($Section)
+    $escapedKey = [regex]::Escape($Key)
+    $sectionMatch = [regex]::Match($Content, "(?ms)(^\[$escapedSection\]\r?\n)(.*?)(?=^\[|\z)")
+    $values = @()
+    if ($sectionMatch.Success) {
+        $keyMatch = [regex]::Match($sectionMatch.Groups[2].Value, "(?m)^$escapedKey\s*=\s*(.*)$")
+        if ($keyMatch.Success) {
+            $values = @($keyMatch.Groups[1].Value.Split(',') | ForEach-Object {
+                $_.Trim().Trim('"').Trim("'")
+            } | Where-Object { $_ })
+        }
+    }
+    if ($values -notcontains $Value) {
+        $values += $Value
+    }
+    return Set-IniValue -Content $Content -Section $Section -Key $Key -Value ($values -join ', ')
+}
+
 function Set-SabnzbdCategory {
     param(
         [string]$Content,
@@ -604,6 +630,7 @@ function Ensure-SabnzbdConfig {
     $updatedContent = Set-IniValue -Content $updatedContent -Section 'misc' -Key 'password' -Value $Password
     $updatedContent = Set-IniValue -Content $updatedContent -Section 'misc' -Key 'download_dir' -Value '/data/usenet/incomplete'
     $updatedContent = Set-IniValue -Content $updatedContent -Section 'misc' -Key 'complete_dir' -Value '/data/usenet/complete'
+    $updatedContent = Add-IniListValue -Content $updatedContent -Section 'misc' -Key 'host_whitelist' -Value 'sabnzbd'
     $updatedContent = Set-SabnzbdCategory -Content $updatedContent -Name 'tv' -Directory 'tv'
     $updatedContent = Set-SabnzbdCategory -Content $updatedContent -Name 'movies' -Directory 'movies'
 

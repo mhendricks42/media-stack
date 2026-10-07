@@ -93,7 +93,6 @@ Set-SessionEnv 'QBIT_PASS' (Read-SecretValue 'QBIT_PASS' 'qBittorrent Web UI pas
 Set-SessionEnv 'SABNZBD_USER' (Read-Value 'SABNZBD_USER' 'SABnzbd Web UI username' 'admin' -Required)
 Set-SessionEnv 'SABNZBD_PASS' (Read-SecretValue 'SABNZBD_PASS' 'SABnzbd Web UI password' 6)
 
-Set-SessionEnv 'ANIMETOSHO_API_KEY' (Read-OptionalSecretValue 'ANIMETOSHO_API_KEY' 'AnimeTosho API key')
 Set-SessionEnv 'NZBGEEK_API_KEY' (Read-OptionalSecretValue 'NZBGEEK_API_KEY' 'NZBGeek API key')
 Set-SessionEnv 'NZBPLANET_API_KEY' (Read-OptionalSecretValue 'NZBPLANET_API_KEY' 'NZBPlanet API key')
 

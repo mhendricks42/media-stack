@@ -4,10 +4,7 @@
       "schemaName": "animetosho-xyz",
       "enable": true,
       "priority": 10,
-      "appProfileId": 1,
-      "fields": {
-        "apiKey": "env:ANIMETOSHO_API_KEY"
-      }
+      "appProfileId": 1
     },
     {
       "schemaName": "nyaasi",
@@ -19,7 +16,7 @@
       }
     },
     {
-      "schemaName": "nzbgeek",
+      "schemaName": "NZBgeek",
       "enable": false,
       "priority": 10,
       "appProfileId": 1,
@@ -28,7 +25,7 @@
       }
     },
     { 
-      "schemaName": "nzbplanet",
+      "schemaName": "NzbPlanet",
       "enable": false,
       "priority": 10,
       "appProfileId": 1,

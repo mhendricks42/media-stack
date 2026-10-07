@@ -85,7 +85,6 @@ read_secret QBIT_PASS "qBittorrent Web UI password" 6
 read_value SABNZBD_USER "SABnzbd Web UI username" "admin"
 read_secret SABNZBD_PASS "SABnzbd Web UI password" 6
 
-read_secret ANIMETOSHO_API_KEY "AnimeTosho API key (blank to skip)" 1 0
 read_secret NZBGEEK_API_KEY "NZBGeek API key (blank to skip)" 1 0
 read_secret NZBPLANET_API_KEY "NZBPlanet API key (blank to skip)" 1 0
 

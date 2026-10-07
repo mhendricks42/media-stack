@@ -53,6 +53,12 @@ get_api_key() {
   printf '%s' "$value"
 }
 
+redact_sensitive() {
+  sed -E \
+    -e 's/("(password|pass|api[Kk]ey|token|secret)"[[:space:]]*:[[:space:]]*")[^"]+/\1<redacted>/gI' \
+    -e 's/((password|pass|api[Kk]ey|token|secret)=)[^&\\"[:space:]]+/\1<redacted>/gI'
+}
+
 api() {
   local method="$1"
   local url="$2"
@@ -76,7 +82,7 @@ api() {
     fi
   fi
   if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
-    sed -E 's/("(password|pass|api[Kk]ey|token|secret)"[[:space:]]*:[[:space:]]*")[^"]+/\1<redacted>/g' "$response" >&2
+    redact_sensitive <"$response" >&2
     rm -f "$response"
     fail "API $method $url failed with status $status."
   fi
@@ -204,6 +210,24 @@ def set_section_value(text, section, key, value):
         block = block.rstrip() + f"\n{replacement}\n"
     return text[:section_match.end()] + block + text[block_end:]
 
+def append_section_list_value(text, section, key, value):
+    section_pattern = rf"(?ms)(^\[{re.escape(section)}\]\r?\n)(.*?)(?=^\[|\Z)"
+    section_match = re.search(section_pattern, text)
+    if not section_match:
+        text = set_section_value(text, section, key, value)
+        return text
+    key_match = re.search(rf"(?m)^{re.escape(key)}\s*=\s*(.*)$", section_match.group(2))
+    values = []
+    if key_match:
+        values = [
+            item.strip().strip("\"'")
+            for item in key_match.group(1).split(",")
+            if item.strip().strip("\"'")
+        ]
+    if value.casefold() not in {item.casefold() for item in values}:
+        values.append(value)
+    return set_section_value(text, section, key, ", ".join(values))
+
 for key, value in {
     "host": "0.0.0.0",
     "port": "8080",
@@ -213,6 +237,7 @@ for key, value in {
     "complete_dir": "/data/usenet/complete",
 }.items():
     content = set_section_value(content, "misc", key, value)
+content = append_section_list_value(content, "misc", "host_whitelist", "sabnzbd")
 
 def set_nested_section(text, parent, name, values):
     if not re.search(rf"(?m)^\[{re.escape(parent)}\]\r?$", text):
@@ -526,20 +551,49 @@ PY
 initialize_seerr() {
   wait_url "$SEERR_URL/api/v1/status" 120
   if [[ "$(curl -sS -f "$SEERR_URL/api/v1/settings/public" | jq -r '.initialized')" != true ]]; then
-    local cookies
+    local cookies response status attempt
     cookies="$(mktemp)"
+    response="$(mktemp)"
     local login_body
     login_body="$(jq -nc \
       --arg username "$JELLYFIN_USER" --arg password "$JELLYFIN_PASS" --arg email "$SEERR_EMAIL" \
       '{username:$username,password:$password,hostname:"jellyfin",port:8096,useSsl:false,urlBase:"",email:$email,serverType:2}')"
-    if ! curl -sS -f -c "$cookies" -X POST "$SEERR_URL/api/v1/auth/jellyfin" \
-      -H 'Content-Type: application/json' --data-binary "$login_body" >/dev/null ||
-      ! curl -sS -f -b "$cookies" -X POST "$SEERR_URL/api/v1/settings/initialize" \
-        -H 'Content-Type: application/json' --data-binary '{}' >/dev/null; then
-      rm -f "$cookies"
-      fail "Seerr initialization with Jellyfin failed."
+
+    status=000
+    for ((attempt = 0; attempt < 15; attempt++)); do
+      if ! status="$(curl -sS -o "$response" -c "$cookies" -w '%{http_code}' \
+        -X POST "$SEERR_URL/api/v1/auth/jellyfin" \
+        -H 'Content-Type: application/json' --data-binary "$login_body")"; then
+        status=000
+      fi
+      [[ "$status" -ge 200 && "$status" -lt 300 ]] && break
+      [[ "$status" =~ ^(000|404|502|503|504)$ ]] || break
+      sleep 2
+    done
+    if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+      redact_sensitive <"$response" >&2
+      rm -f "$cookies" "$response"
+      fail "Seerr Jellyfin authentication failed with HTTP $status."
     fi
-    rm -f "$cookies"
+
+    status=000
+    for ((attempt = 0; attempt < 15; attempt++)); do
+      if ! status="$(curl -sS -o "$response" -b "$cookies" -w '%{http_code}' \
+        -X POST "$SEERR_URL/api/v1/settings/initialize" \
+        -H 'Content-Type: application/json' --data-binary '{}')"; then
+        status=000
+      fi
+      [[ "$status" -ge 200 && "$status" -lt 300 ]] && break
+      [[ "$status" =~ ^(000|404|502|503|504)$ ]] || break
+      sleep 2
+    done
+    if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+      redact_sensitive <"$response" >&2
+      rm -f "$cookies" "$response"
+      fail "Seerr settings initialization failed with HTTP $status."
+    fi
+
+    rm -f "$cookies" "$response"
     echo "Seerr administrator initialized from Jellyfin credentials."
   else
     echo "Seerr administrator is already configured."
@@ -621,7 +675,13 @@ import_indexers() {
     [[ "$enabled" == true ]] || continue
     schema_name="$(jq -r '.schemaName // empty' <<<"$item")"
     [[ -n "$schema_name" ]] || fail "Every indexer entry must include schemaName."
-    payload="$(jq -c --arg name "$schema_name" '.[] | select(.name==$name or .definitionName==$name)' <<<"$schemas" | head -n 1)"
+    payload="$(jq -c --arg name "$schema_name" '
+      .[] |
+      select(
+        ((.name // "") | ascii_downcase) == ($name | ascii_downcase) or
+        ((.definitionName // "") | ascii_downcase) == ($name | ascii_downcase)
+      )
+    ' <<<"$schemas" | head -n 1)"
     [[ -n "$payload" ]] || fail "No Prowlarr indexer schema found for '$schema_name'."
     name="$(jq -r --arg fallback "$(jq -r '.name' <<<"$payload")" '.name // $fallback' <<<"$item")"
     payload="$(jq --arg name "$name" --argjson enabled "$enabled" '.name=$name | .enable=$enabled' <<<"$payload")"
