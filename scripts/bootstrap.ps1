@@ -1106,5 +1106,31 @@ Write-Host 'Configuring Seerr...'
 if ($LASTEXITCODE -ne 0) {
     Write-Host 'WARNING: Seerr bootstrap failed, but main bootstrap completed. Restart Seerr and try again manually.'
 }
+else {
+    docker compose restart seerr | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Seerr restart failed after updating its service configuration.'
+    }
+
+    $seerrReady = $false
+    for ($attempt = 0; $attempt -lt 120; $attempt++) {
+        try {
+            Invoke-WebRequest -Method GET -Uri 'http://localhost:5055/api/v1/status' -UseBasicParsing -TimeoutSec 2 | Out-Null
+            $seerrReady = $true
+            break
+        }
+        catch {
+            Start-Sleep -Seconds 1
+        }
+    }
+    if (-not $seerrReady) {
+        throw 'Seerr did not become ready within 120 seconds after restart.'
+    }
+
+    & "$PSScriptRoot\bootstrap-jellyfin.ps1" -MoonbaseReprovisionOnly
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Moonbase Seerr webhook reprovision failed.'
+    }
+}
 
 Write-Host 'Bootstrap complete.'

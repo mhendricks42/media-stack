@@ -128,6 +128,8 @@ Set-SessionEnv 'BAZARR_PASS' (Read-SecretValue 'BAZARR_PASS' 'Bazarr UI password
 
 Set-SessionEnv 'JELLYFIN_USER' (Read-Value 'JELLYFIN_USER' 'Jellyfin administrator username' 'admin' -Required)
 Set-SessionEnv 'JELLYFIN_PASS' (Read-SecretValue 'JELLYFIN_PASS' 'Jellyfin administrator password' 6)
+Set-SessionEnv 'MOONBASE_TMDB_API_KEY' (Read-OptionalSecretValue 'MOONBASE_TMDB_API_KEY' 'Moonbase server-wide TMDB API key')
+Set-SessionEnv 'MOONBASE_MDBLIST_API_KEY' (Read-OptionalSecretValue 'MOONBASE_MDBLIST_API_KEY' 'Moonbase server-wide MDBList API key')
 
 Set-SessionEnv 'SEERR_EMAIL' (Read-Value 'SEERR_EMAIL' 'Seerr administrator email' 'admin@example.invalid' -Required)
 

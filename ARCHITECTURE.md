@@ -25,8 +25,9 @@ bootstrap wiring, operational checks, and cross-platform wrappers.
 | Container orchestration | Docker Engine 24+ and Docker Compose plugin | [readme.md](readme.md#L157-L163) |
 | Deployment definition | Compose base file plus target, secret, and optional GPU overlays | [readme.md](readme.md#L81-L125), [docker-compose.yml](docker-compose.yml#L1-L10) |
 | Windows automation | PowerShell wrapper and idempotent bootstrap scripts | [stack.ps1](stack.ps1#L1-L29), [scripts/bootstrap.ps1](scripts/bootstrap.ps1#L1-L25) |
-| Linux automation | Bash wrapper and bootstrap scripts; bootstrap also requires `curl`, `jq`, and Python 3 | [stack.sh](stack.sh#L1-L20), [scripts/bootstrap.sh](scripts/bootstrap.sh#L804-L813) |
+| Linux automation | Bash wrapper and bootstrap scripts; bootstrap also requires `curl`, `jq`, and Python 3 | [stack.sh](stack.sh#L1-L20), [scripts/bootstrap.sh](scripts/bootstrap.sh#L975-L979) |
 | Service APIs | Sonarr/Radarr v3 APIs, Prowlarr v1 API, qBittorrent, SABnzbd, Jellyfin, and Seerr APIs | [scripts/bootstrap.sh](scripts/bootstrap.sh#L3-L11), [scripts/bootstrap.ps1](scripts/bootstrap.ps1#L77-L106) |
+| Jellyfin extension | Pinned Moonbase plugin for Moonfin web hosting, settings sync, and Seerr integration | [env/linux.env.example](env/linux.env.example#L18-L24), [scripts/bootstrap-jellyfin.ps1](scripts/bootstrap-jellyfin.ps1#L123-L238) |
 | Declarative policy | YAML Recyclarr profiles and JSON Prowlarr indexer definitions | [recyclarr.example.yml](recyclarr.example.yml#L1-L16), [indexers.example.json](indexers.example.json#L1-L46) |
 | Persistent state | Bind-mounted application configuration, mostly SQLite/XML/INI/JSON owned by upstream services | [docker-compose.yml](docker-compose.yml#L58-L60), [readme.md](readme.md#L148-L155) |
 | Shared media storage | One `/data` tree for Usenet, torrents, and media to preserve hardlinks | [readme.md](readme.md#L73-L79), [readme.md](readme.md#L536-L548) |
@@ -91,7 +92,7 @@ are loaded by sourcing `scripts/set-env.sh`.
 
 The ignore boundary is deliberate: application state, `.env`, active indexer
 configuration, backups, and VPN secrets are excluded in
-[.gitignore](.gitignore#L1-L17).
+[.gitignore](.gitignore#L1-L16).
 
 ### Deployment and runtime surface
 
@@ -112,8 +113,9 @@ container image is currently immutable or even version-pinned.
 | Recyclarr | `recyclarr/recyclarr:latest` | Floating one-shot policy synchronizer | [docker-compose.yml](docker-compose.yml#L179-L200) |
 | Seerr | `seerr/seerr:latest` | Floating request UI | [docker-compose.yml](docker-compose.yml#L202-L215) |
 | Tailscale, both targets | `tailscale/tailscale:latest` | Floating remote-access agent | [compose/linux.yml](compose/linux.yml#L1-L4), [compose/windows.yml](compose/windows.yml#L1-L6) |
+| Moonbase Jellyfin plugin | `2.4.0.0` in both target templates | Pinned plugin package installed through Jellyfin's catalog API | [env/linux.env.example](env/linux.env.example#L18-L24), [env/windows.env.example](env/windows.env.example#L19-L25) |
 | Docker runtime | Docker Engine 24+ | Host prerequisite, not repository-pinned | [readme.md](readme.md#L157-L163) |
-| PowerShell/Bash/Python/jq/curl | No exact versions | Script behavior depends on host tools | [readme.md](readme.md#L161-L163), [scripts/bootstrap.sh](scripts/bootstrap.sh#L804-L808) |
+| PowerShell/Bash/Python/jq/curl | No exact versions | Script behavior depends on host tools | [readme.md](readme.md#L161-L163), [scripts/bootstrap.sh](scripts/bootstrap.sh#L975-L979) |
 | Persistent stores | Upstream app-local files under `config/`; no standalone DB/cache/broker image | Upgrade compatibility is delegated to each upstream image | [readme.md](readme.md#L148-L155), [docker-compose.yml](docker-compose.yml#L58-L60) |
 
 ### EOL, dead-dependency, and drift scan
@@ -160,7 +162,7 @@ container image is currently immutable or even version-pinned.
 - **Control plane:** Bootstrap reads generated local API keys and performs
   idempotent API upserts. It treats the running applications as the source of
   schemas for download clients and indexers
-  ([scripts/bootstrap.sh](scripts/bootstrap.sh#L745-L789),
+  ([scripts/bootstrap.sh](scripts/bootstrap.sh#L914-L958),
   [scripts/bootstrap.ps1](scripts/bootstrap.ps1#L890-L1034)).
 - **Background/on-demand jobs:** Recyclarr is profile-gated and invoked only by
   `sync-profiles` ([docker-compose.yml](docker-compose.yml#L179-L200)).
@@ -216,8 +218,9 @@ container image is currently immutable or even version-pinned.
 The repository composes independently maintained systems rather than sibling
 source repositories. Prowlarr feeds indexers to Sonarr/Radarr; those applications
 choose SABnzbd first and qBittorrent second; Recyclarr owns quality profiles;
-Seerr is the household request front end; Jellyfin serves imported media; and
-ErsatzTV produces M3U/XMLTV pseudo-live channels
+Seerr is the household request front end; Jellyfin serves imported media;
+Moonbase adds the Moonfin server/web integration; and ErsatzTV produces
+M3U/XMLTV pseudo-live channels
 ([readme.md](readme.md#L35-L79)). The integration boundary is HTTP plus the
 shared `/data` contract, so upstream API and configuration-schema changes are
 the primary compatibility risk.
@@ -296,7 +299,7 @@ sequenceDiagram
    whole service definitions ([readme.md](readme.md#L81-L125)).
 3. **Bootstrap → generated application state:** scripts may read and mutate
    ignored `config/`, but versioned files must not contain generated API keys or
-   sessions ([.gitignore](.gitignore#L1-L17)).
+   sessions ([.gitignore](.gitignore#L1-L16)).
 4. **Applications → shared paths:** downloaders and arr applications use the
    same `/data` namespace; consumers receive read-only media mounts where
    possible ([docker-compose.yml](docker-compose.yml#L58-L60),
@@ -458,14 +461,14 @@ flowchart TD
 
 The Bash coordinator validates tools and environment, extracts API keys, applies
 each service baseline, upserts Prowlarr applications and download clients, then
-configures Seerr ([scripts/bootstrap.sh](scripts/bootstrap.sh#L804-L850)).
+configures Seerr ([scripts/bootstrap.sh](scripts/bootstrap.sh#L975-L1011)).
 PowerShell follows the same broad order
-([scripts/bootstrap.ps1](scripts/bootstrap.ps1#L1050-L1110)).
+([scripts/bootstrap.ps1](scripts/bootstrap.ps1#L1050-L1135)).
 
 Idempotency is achieved by querying resources by name/path and choosing POST or
 PUT rather than blindly inserting. Schema-driven payload construction reduces
 coupling to exact upstream field sets
-([scripts/bootstrap.sh](scripts/bootstrap.sh#L745-L789),
+([scripts/bootstrap.sh](scripts/bootstrap.sh#L914-L958),
 [scripts/bootstrap.ps1](scripts/bootstrap.ps1#L890-L1034)). The main residual
 risk is semantic duplication: fixes must often be applied independently in Bash
 and PowerShell.

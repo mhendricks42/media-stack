@@ -14,7 +14,7 @@ networks:
 
 services:
   gluetun:
-    image: qmcgaw/gluetun:latest
+    image: qmcgaw/gluetun@sha256:2733bb22b27e3efa7a9f2cef9057ec12791b8b225793fcd3dbfd0508404dfc25
     cap_add:
       - NET_ADMIN
     devices:
@@ -42,7 +42,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    image: lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479
     network_mode: service:gluetun
     depends_on:
       gluetun:
@@ -61,7 +61,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   sabnzbd:
-    image: lscr.io/linuxserver/sabnzbd:latest
+    image: lscr.io/linuxserver/sabnzbd:5.1.3-ls275
     networks:
       - medianet
     security_opt:
@@ -78,7 +78,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
+    image: lscr.io/linuxserver/prowlarr:2.6.5.5623-ls162
     networks:
       - medianet
     security_opt:
@@ -94,7 +94,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   sonarr:
-    image: lscr.io/linuxserver/sonarr:latest
+    image: lscr.io/linuxserver/sonarr:4.0.20.3014-ls326
     networks:
       - medianet
     security_opt:
@@ -111,7 +111,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   radarr:
-    image: lscr.io/linuxserver/radarr:latest
+    image: lscr.io/linuxserver/radarr:6.4.4.10685-ls319
     networks:
       - medianet
     security_opt:
@@ -128,7 +128,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   bazarr:
-    image: lscr.io/linuxserver/bazarr:latest
+    image: lscr.io/linuxserver/bazarr:v1.6.2-ls366
     networks:
       - medianet
     security_opt:
@@ -145,7 +145,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   jellyfin:
-    image: lscr.io/linuxserver/jellyfin:latest
+    image: lscr.io/linuxserver/jellyfin@sha256:b0b6d034aa52ed6e1a76daaa3d7ed29039d2b802a50fa8ffd1d9fc8d3fd836c7
     networks:
       - medianet
     security_opt:
@@ -162,7 +162,7 @@ services:
     restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}
 
   ersatztv:
-    image: jasongdove/ersatztv:latest
+    image: jasongdove/ersatztv@sha256:7c402e5f348184359e0951b44d55fb6db3df671fa77fc91dcbd609034d28778b
     networks:
       - medianet
     security_opt:
@@ -183,7 +183,7 @@ services:
   # Recyclarr publishes no `latest` tag on purpose, because a major version
   # bump can require config changes. Pin the major version deliberately.
   recyclarr:
-    image: recyclarr/recyclarr:latest
+    image: recyclarr/recyclarr@sha256:9c6c74d52cfc6f740a5a3624aa83867e171bb70b90453ddb7a4048b8c80445f9
     profiles:
       - recyclarr
     networks:
@@ -200,7 +200,7 @@ services:
     restart: "no"
 
   seerr:
-    image: seerr/seerr:latest
+    image: seerr/seerr@sha256:27602401178d54f1964442287b9f23f67a3fa2252645ee8065839ea1c3f69e45
     init: true
     networks:
       - medianet

@@ -7,7 +7,8 @@ param(
     [string]$ShowsLibraryName = 'Shows',
     [string]$ShowsLibraryPath = '/data/media/tv',
     [string]$LiveTvTunerUrl = 'http://ersatztv:8409/iptv/channels.m3u',
-    [string]$LiveTvGuideUrl = 'http://ersatztv:8409/iptv/xmltv.xml'
+    [string]$LiveTvGuideUrl = 'http://ersatztv:8409/iptv/xmltv.xml',
+    [switch]$MoonbaseReprovisionOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,16 +31,32 @@ function Get-EnvFileValue {
     return $value.Trim().Trim('"').Trim("'")
 }
 
+function Get-EnvFileBool {
+    param(
+        [string]$Name,
+        [bool]$Default
+    )
+
+    $defaultText = if ($Default) { 'true' } else { 'false' }
+    $value = (Get-EnvFileValue -Name $Name -Default $defaultText).Trim().ToLowerInvariant()
+    switch ($value) {
+        'true' { return $true }
+        'false' { return $false }
+        default { throw "$Name must be true or false, not '$value'." }
+    }
+}
+
 function Invoke-JsonRequest {
     param(
         [ValidateSet('GET', 'POST', 'PUT')]
         [string]$Method,
         [string]$Uri,
         [hashtable]$Headers = @{},
-        [object]$Body = $null
+        [object]$Body = $null,
+        [int]$TimeoutSec = 20
     )
 
-    $parameters = @{ Method = $Method; Uri = $Uri; Headers = $Headers; UseBasicParsing = $true; TimeoutSec = 20 }
+    $parameters = @{ Method = $Method; Uri = $Uri; Headers = $Headers; UseBasicParsing = $true; TimeoutSec = $TimeoutSec }
     if ($null -ne $Body) {
         $parameters.ContentType = 'application/json; charset=utf-8'
         $parameters.Body = [System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $Body -Depth 40))
@@ -82,6 +99,143 @@ function Get-JellyfinTokenHeaders {
     param([string]$AccessToken)
 
     return @{ Authorization = "MediaBrowser Token=`"$AccessToken`", Client=`"media-stack`", Device=`"bootstrap`", DeviceId=`"media-stack-bootstrap`", Version=`"1.0`"" }
+}
+
+function Set-JsonPropertyValue {
+    param(
+        [object]$Object,
+        [string]$Name,
+        [object]$Value
+    )
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($property) {
+        if ($property.Value -eq $Value) { return $false }
+        $property.Value = $Value
+    }
+    else {
+        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+    }
+
+    return $true
+}
+
+function Ensure-MoonbaseRepository {
+    param(
+        [hashtable]$Headers,
+        [string]$RepositoryUrl
+    )
+
+    $repositories = @(Invoke-JsonRequest -Method GET -Uri 'http://localhost:8096/Repositories' -Headers $Headers)
+    $existing = $repositories | Where-Object { $_.Url -eq $RepositoryUrl } | Select-Object -First 1
+    if ($existing) {
+        if ($existing.PSObject.Properties['Enabled'] -and -not $existing.Enabled) {
+            $existing.Enabled = $true
+            Invoke-JsonRequest -Method POST -Uri 'http://localhost:8096/Repositories' -Headers $Headers -Body $repositories | Out-Null
+            Write-Host 'Moonbase plugin repository enabled.'
+        }
+        else {
+            Write-Host 'Moonbase plugin repository verified.'
+        }
+        return
+    }
+
+    $repositories += [pscustomobject]@{
+        Name = 'Moonbase'
+        Url = $RepositoryUrl
+        Enabled = $true
+    }
+    Invoke-JsonRequest -Method POST -Uri 'http://localhost:8096/Repositories' -Headers $Headers -Body $repositories | Out-Null
+    Write-Host 'Moonbase plugin repository configured.'
+}
+
+function Ensure-MoonbasePlugin {
+    param(
+        [hashtable]$Headers,
+        [string]$PluginId,
+        [string]$Version,
+        [string]$RepositoryUrl
+    )
+
+    $systemInfo = Invoke-JsonRequest -Method GET -Uri 'http://localhost:8096/System/Info' -Headers $Headers
+    if ([version]$systemInfo.Version -lt [version]'10.10.0') {
+        throw "Moonbase requires Jellyfin 10.10 or newer; this server reports $($systemInfo.Version)."
+    }
+
+    Ensure-MoonbaseRepository -Headers $Headers -RepositoryUrl $RepositoryUrl
+    $plugins = @(Invoke-JsonRequest -Method GET -Uri 'http://localhost:8096/Plugins' -Headers $Headers)
+    $plugin = $plugins | Where-Object {
+        [string]$_.Id -eq $PluginId -and [string]$_.Version -eq $Version
+    } | Select-Object -First 1
+
+    if ($plugin) {
+        if ([string]$plugin.Status -eq 'Disabled') {
+            Invoke-JsonRequest -Method POST -Uri "http://localhost:8096/Plugins/$PluginId/$Version/Enable" -Headers $Headers | Out-Null
+            Write-Host "Moonbase $Version enabled; Jellyfin restart required."
+            return $true
+        }
+
+        Write-Host "Moonbase plugin verified: $Version"
+        return $false
+    }
+
+    $encodedRepositoryUrl = [Uri]::EscapeDataString($RepositoryUrl)
+    $installUri = "http://localhost:8096/Packages/Installed/Moonbase?assemblyGuid=$PluginId&version=$Version&repositoryUrl=$encodedRepositoryUrl"
+    Invoke-JsonRequest -Method POST -Uri $installUri -Headers $Headers -TimeoutSec 300 | Out-Null
+    Write-Host "Moonbase $Version installed; Jellyfin restart required."
+    return $true
+}
+
+function Ensure-MoonbaseConfiguration {
+    param(
+        [hashtable]$Headers,
+        [string]$PluginId,
+        [bool]$SettingsSyncEnabled,
+        [bool]$SeerrEnabled,
+        [string]$SeerrUrl,
+        [string]$PublicServerUrl
+    )
+
+    $uri = "http://localhost:8096/Plugins/$PluginId/Configuration"
+    $configuration = Invoke-JsonRequest -Method GET -Uri $uri -Headers $Headers
+    $changed = $false
+    $changed = (Set-JsonPropertyValue -Object $configuration -Name 'EnableSettingsSync' -Value $SettingsSyncEnabled) -or $changed
+    $changed = (Set-JsonPropertyValue -Object $configuration -Name 'SeerrEnabled' -Value $SeerrEnabled) -or $changed
+    $changed = (Set-JsonPropertyValue -Object $configuration -Name 'SeerrUrl' -Value $SeerrUrl) -or $changed
+    $changed = (Set-JsonPropertyValue -Object $configuration -Name 'PublicServerUrl' -Value $PublicServerUrl) -or $changed
+
+    if ($env:MOONBASE_TMDB_API_KEY) {
+        $changed = (Set-JsonPropertyValue -Object $configuration -Name 'TmdbApiKey' -Value $env:MOONBASE_TMDB_API_KEY) -or $changed
+    }
+    if ($env:MOONBASE_MDBLIST_API_KEY) {
+        $changed = (Set-JsonPropertyValue -Object $configuration -Name 'MdblistApiKey' -Value $env:MOONBASE_MDBLIST_API_KEY) -or $changed
+    }
+
+    if ($changed) {
+        Invoke-JsonRequest -Method POST -Uri $uri -Headers $Headers -Body $configuration | Out-Null
+        Write-Host 'Moonbase server configuration updated.'
+    }
+    else {
+        Write-Host 'Moonbase server configuration verified.'
+    }
+}
+
+function Test-Moonbase {
+    param([hashtable]$Headers)
+
+    $status = Invoke-JsonRequest -Method GET -Uri 'http://localhost:8096/Moonfin/Ping' -Headers $Headers
+    if (-not $status.Installed) {
+        throw 'Moonbase did not report itself as installed.'
+    }
+
+    Write-Host "Moonbase API verified: $($status.Version)"
+}
+
+function Invoke-MoonbaseReprovision {
+    param([hashtable]$Headers)
+
+    Invoke-JsonRequest -Method POST -Uri 'http://localhost:8096/Moonfin/Notifications/Reprovision' -Headers $Headers | Out-Null
+    Write-Host 'Moonbase Seerr webhook reprovision requested.'
 }
 
 function Ensure-JellyfinServerName {
@@ -368,23 +522,72 @@ function Wait-JellyfinWebUi {
     throw "Jellyfin did not become ready within 90 seconds. Last error: $lastError"
 }
 
+function Wait-JellyfinSession {
+    $lastError = ''
+    for ($attempt = 1; $attempt -le 90; $attempt++) {
+        try {
+            $session = Get-JellyfinSession
+            if ($session.AccessToken) {
+                return $session
+            }
+            $lastError = 'Authentication returned no access token.'
+        }
+        catch {
+            $lastError = $_.Exception.Message
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    throw "Jellyfin authentication did not become ready within 90 seconds after restart. Last error: $lastError"
+}
+
 Write-Host 'Configuring Jellyfin server baseline...'
 if ([string]::IsNullOrWhiteSpace($JellyfinServerName)) {
     $JellyfinServerName = Get-EnvFileValue -Name 'JELLYFIN_SERVER_NAME' -Default 'Media Stack'
 }
 
+$moonbaseEnabled = Get-EnvFileBool -Name 'MOONBASE_ENABLED' -Default $true
+$moonbaseSettingsSyncEnabled = Get-EnvFileBool -Name 'MOONBASE_SETTINGS_SYNC_ENABLED' -Default $true
+$moonbaseSeerrEnabled = Get-EnvFileBool -Name 'MOONBASE_SEERR_ENABLED' -Default $true
+$moonbasePluginId = '8c5d0e91-4f2a-4b6d-9e3f-1a7c8d9e0f2b'
+$moonbaseVersion = Get-EnvFileValue -Name 'MOONBASE_VERSION' -Default '2.4.0.0'
+$moonbaseRepositoryUrl = 'https://raw.githubusercontent.com/Moonfin-Client/Plugin/refs/heads/master/manifest.json'
+$moonbaseSeerrUrl = Get-EnvFileValue -Name 'MOONBASE_SEERR_URL' -Default 'http://seerr:5055'
+$moonbasePublicServerUrl = Get-EnvFileValue -Name 'MOONBASE_PUBLIC_SERVER_URL' -Default 'http://jellyfin:8096'
+
 $session = Get-JellyfinSession
 $headers = Get-JellyfinTokenHeaders -AccessToken $session.AccessToken
+
+if ($MoonbaseReprovisionOnly) {
+    if ($moonbaseEnabled -and $moonbaseSeerrEnabled) {
+        Test-Moonbase -Headers $headers
+        Invoke-MoonbaseReprovision -Headers $headers
+    }
+    return
+}
 
 Ensure-JellyfinServerName -Headers $headers
 Ensure-JellyfinLibrary -Headers $headers -Name $MoviesLibraryName -CollectionType 'movies' -Path $MoviesLibraryPath
 Ensure-JellyfinLibrary -Headers $headers -Name $ShowsLibraryName -CollectionType 'tvshows' -Path $ShowsLibraryPath
 $liveTvChanged = Ensure-JellyfinLiveTvConfig
+$moonbaseChanged = $false
+if ($moonbaseEnabled) {
+    $moonbaseChanged = Ensure-MoonbasePlugin -Headers $headers -PluginId $moonbasePluginId -Version $moonbaseVersion -RepositoryUrl $moonbaseRepositoryUrl
+}
 
-if ($liveTvChanged) {
+if ($liveTvChanged -or $moonbaseChanged) {
     Invoke-DockerComposeQuiet -Arguments @('restart', 'jellyfin')
     Wait-JellyfinWebUi
-    Write-Host 'Jellyfin restarted to load Live TV baseline.'
+    $session = Wait-JellyfinSession
+    $headers = Get-JellyfinTokenHeaders -AccessToken $session.AccessToken
+    Write-Host 'Jellyfin restarted to load baseline changes.'
+}
+
+if ($moonbaseEnabled) {
+    Ensure-MoonbaseConfiguration -Headers $headers -PluginId $moonbasePluginId `
+        -SettingsSyncEnabled $moonbaseSettingsSyncEnabled -SeerrEnabled $moonbaseSeerrEnabled `
+        -SeerrUrl $moonbaseSeerrUrl -PublicServerUrl $moonbasePublicServerUrl
+    Test-Moonbase -Headers $headers
 }
 
 Write-Host 'Jellyfin baseline complete.'

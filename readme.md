@@ -211,7 +211,7 @@ Run `./stack.sh init-vpn` or `.\stack.ps1 init-vpn` separately for NordVPN crede
 - `RADARR_USER` / `RADARR_PASS`
 - `PROWLARR_USER` / `PROWLARR_PASS`
 - `BAZARR_USER` / `BAZARR_PASS`
-- `JELLYFIN_USER` / `JELLYFIN_PASS`
+- `JELLYFIN_USER` / `JELLYFIN_PASS`, plus optional `MOONBASE_TMDB_API_KEY` and `MOONBASE_MDBLIST_API_KEY` integration secrets
 - `SEERR_EMAIL` for the Seerr administrator linked to Jellyfin
 
 The Bash helper must be sourced, not executed, because only a sourced script can export variables into your current shell. On either platform, closing the terminal clears these session secrets. For production, inject the same variables from a secret manager instead of typing them interactively.
@@ -349,7 +349,7 @@ Order matters — doing it in this sequence avoids re-entering things.
 
 **1. Run bootstrap after first startup.** Run `up` once before `bootstrap`; the apps need to create their `config/` files and API keys first. Bootstrap then configures UI logins, SABnzbd paths and provider servers, qBittorrent paths/seeding limits, Prowlarr app links, Sonarr episode naming and media management, Sonarr/Radarr download clients, Jellyfin server settings, and root folders.
 
-On a fresh installation, bootstrap configures forms authentication for qBittorrent, SABnzbd, Sonarr, Radarr, Prowlarr, and Bazarr. It initializes the Jellyfin administrator from `JELLYFIN_USER` / `JELLYFIN_PASS`, applies the Jellyfin baseline, then configures Seerr from that Jellyfin administrator using `SEERR_EMAIL` and verifies Seerr's API key. Passwords are only read from runtime environment variables; qBittorrent uses a salted PBKDF2 hash and Bazarr uses its documented MD5 password hash in their local configuration. No temporary password or manual Web UI configuration is needed. Passwords must be at least six characters long.
+On a fresh installation, bootstrap configures forms authentication for qBittorrent, SABnzbd, Sonarr, Radarr, Prowlarr, and Bazarr. It initializes the Jellyfin administrator from `JELLYFIN_USER` / `JELLYFIN_PASS`, applies the Jellyfin baseline, installs and configures the pinned Moonbase server plugin for Moonfin, then configures Seerr from that Jellyfin administrator using `SEERR_EMAIL` and verifies Seerr's API key. Passwords are only read from runtime environment variables; qBittorrent uses a salted PBKDF2 hash and Bazarr uses its documented MD5 password hash in their local configuration. No temporary password or manual Web UI configuration is needed. Passwords must be at least six characters long.
 
 ```powershell
 .\stack.ps1 env
@@ -439,7 +439,7 @@ The negative scores on Anime Raws and Anime LQ Groups are what actually keeps un
 
 [Buildarr](https://github.com/buildarr/buildarr) covers the same ground if you want indexers and naming schemes declarative too.
 
-**5. Jellyfin** (`:8096`). Bootstrap creates the `Movies` and `Shows` libraries, sets the server name, and adds ErsatzTV as an M3U tuner with XMLTV guide data. Then in Sonarr and Radarr, Settings → Connect → add Jellyfin so imports trigger an immediate scan.
+**5. Jellyfin and Moonbase** (`:8096`). Bootstrap creates the `Movies` and `Shows` libraries, sets the server name, and adds ErsatzTV as an M3U tuner with XMLTV guide data. It also merges the official Moonbase catalog into Jellyfin's repository list, installs the `MOONBASE_VERSION` pinned in `.env`, restarts Jellyfin when installation state changes, merges the Moonbase plugin configuration, and verifies `/Moonfin/Ping`. Moonbase settings sync and the Seerr integration default to enabled; the server-to-server URLs default to `http://seerr:5055` and `http://jellyfin:8096`. Set `MOONBASE_ENABLED=false` to skip plugin management, or change the `MOONBASE_*` values in `.env` before bootstrap. Optional TMDB and MDBList keys come from the current shell, never `.env`. After Seerr is configured, bootstrap requests Moonbase webhook reprovisioning. Then in Sonarr and Radarr, Settings → Connect → add Jellyfin so imports trigger an immediate scan.
 
 **6. ErsatzTV** (`:8409`). Add `/data/media` as a local media source, or connect ErsatzTV to Jellyfin if you prefer it to read Jellyfin libraries and metadata. Create collections or smart collections, then create channels and schedules. ErsatzTV exposes M3U tuner and XMLTV guide URLs, and bootstrap adds those URLs to Jellyfin Live TV.
 
@@ -481,7 +481,7 @@ If usage jumped by the file size, hardlinks are not working. Fix that before add
 ./stack.sh ps                 # status
 source ./scripts/set-env.sh   # prompt for session env vars
 ./stack.sh setup-data         # create /data/usenet, /data/torrents, and media folders
-./stack.sh bootstrap          # configure authentication, apps, clients, Jellyfin, and Seerr
+./stack.sh bootstrap          # configure authentication, apps, clients, Moonbase, Jellyfin, and Seerr
 ./stack.sh import-indexers    # import local indexers.json into Prowlarr
 ./stack.sh sync-profiles      # sync TRaSH quality profiles and custom formats
 ./stack.sh doctor             # check Docker, data paths, hardlinks, APIs, and Gluetun

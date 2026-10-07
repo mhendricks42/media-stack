@@ -398,6 +398,168 @@ jellyfin_authenticate() {
     --data-binary "$(jq -nc --arg user "$JELLYFIN_USER" --arg pass "$JELLYFIN_PASS" '{Username:$user,Pw:$pass}')"
 }
 
+jellyfin_authenticate_with_retry() {
+  local seconds="$1"
+  local attempt session token
+  for ((attempt = 0; attempt < seconds; attempt++)); do
+    if session="$(jellyfin_authenticate 2>/dev/null)"; then
+      token="$(jq -r '.AccessToken // empty' <<<"$session")"
+      if [[ -n "$token" ]]; then
+        printf '%s' "$session"
+        return
+      fi
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+moonbase_bool_setting() {
+  local name="$1"
+  local default_value="$2"
+  local value
+  value="$(get_env_file_value "$name")"
+  value="${value:-$default_value}"
+  value="${value,,}"
+  case "$value" in
+    true | false) printf '%s' "$value" ;;
+    *) fail "$name must be true or false, not '$value'." ;;
+  esac
+}
+
+ensure_moonbase_plugin() {
+  local auth="$1"
+  local plugin_id='8c5d0e91-4f2a-4b6d-9e3f-1a7c8d9e0f2b'
+  local repository_url='https://raw.githubusercontent.com/Moonfin-Client/Plugin/refs/heads/master/manifest.json'
+  local version repositories updated_repositories plugins status encoded_repository
+
+  [[ "$(moonbase_bool_setting MOONBASE_ENABLED true)" == true ]] || return
+  version="$(get_env_file_value MOONBASE_VERSION)"
+  version="${version:-2.4.0.0}"
+
+  local jellyfin_version
+  jellyfin_version="$(curl -sS -f "$JELLYFIN_URL/System/Info" -H "Authorization: $auth" | jq -r '.Version')"
+  if ! python3 - "$jellyfin_version" <<'PY'
+import sys
+
+parts = sys.argv[1].split(".")
+try:
+    version = tuple(int(part) for part in parts[:2])
+except ValueError as error:
+    raise SystemExit(f"Could not parse Jellyfin version: {sys.argv[1]}") from error
+raise SystemExit(0 if version >= (10, 10) else 1)
+PY
+  then
+    fail "Moonbase requires Jellyfin 10.10 or newer; this server reports $jellyfin_version."
+  fi
+
+  repositories="$(curl -sS -f "$JELLYFIN_URL/Repositories" -H "Authorization: $auth")"
+  if jq -e --arg url "$repository_url" '.[] | select((.Url // .url) == $url)' <<<"$repositories" >/dev/null; then
+    updated_repositories="$(jq --arg url "$repository_url" '
+      map(if (.Url // .url) == $url then
+        if has("Enabled") then .Enabled=true else .enabled=true end
+      else . end)
+    ' <<<"$repositories")"
+    echo "Moonbase plugin repository verified."
+  else
+    updated_repositories="$(jq --arg url "$repository_url" \
+      '. + [{Name:"Moonbase",Url:$url,Enabled:true}]' <<<"$repositories")"
+    echo "Moonbase plugin repository configured."
+  fi
+  if [[ "$(jq -S . <<<"$repositories")" != "$(jq -S . <<<"$updated_repositories")" ]]; then
+    curl -sS -f -X POST "$JELLYFIN_URL/Repositories" \
+      -H "Authorization: $auth" -H 'Content-Type: application/json' \
+      --data-binary "$updated_repositories" >/dev/null
+  fi
+
+  plugins="$(curl -sS -f "$JELLYFIN_URL/Plugins" -H "Authorization: $auth")"
+  if jq -e --arg id "$plugin_id" --arg version "$version" '
+    .[] | select(
+      ((.Id // .id | tostring | ascii_downcase) == ($id | ascii_downcase)) and
+      ((.Version // .version | tostring) == $version)
+    )
+  ' <<<"$plugins" >/dev/null; then
+    status="$(jq -r --arg id "$plugin_id" --arg version "$version" '
+      .[] | select(
+        ((.Id // .id | tostring | ascii_downcase) == ($id | ascii_downcase)) and
+        ((.Version // .version | tostring) == $version)
+      ) | (.Status // .status // "")
+    ' <<<"$plugins" | head -n 1)"
+    if [[ "$status" == Disabled ]]; then
+      curl -sS -f -X POST "$JELLYFIN_URL/Plugins/$plugin_id/$version/Enable" \
+        -H "Authorization: $auth" >/dev/null
+      echo "Moonbase $version enabled; Jellyfin restart required."
+    else
+      echo "Moonbase plugin verified: $version"
+    fi
+    return
+  fi
+
+  encoded_repository="$(jq -rn --arg value "$repository_url" '$value|@uri')"
+  curl -sS -f --max-time 300 -X POST \
+    "$JELLYFIN_URL/Packages/Installed/Moonbase?assemblyGuid=$plugin_id&version=$version&repositoryUrl=$encoded_repository" \
+    -H "Authorization: $auth" >/dev/null
+  echo "Moonbase $version installed; Jellyfin restart required."
+}
+
+configure_moonbase() {
+  local auth="$1"
+  local plugin_id='8c5d0e91-4f2a-4b6d-9e3f-1a7c8d9e0f2b'
+  local settings_sync_enabled seerr_enabled seerr_url public_server_url configuration updated status
+
+  [[ "$(moonbase_bool_setting MOONBASE_ENABLED true)" == true ]] || return
+  settings_sync_enabled="$(moonbase_bool_setting MOONBASE_SETTINGS_SYNC_ENABLED true)"
+  seerr_enabled="$(moonbase_bool_setting MOONBASE_SEERR_ENABLED true)"
+  seerr_url="$(get_env_file_value MOONBASE_SEERR_URL)"
+  seerr_url="${seerr_url:-http://seerr:5055}"
+  public_server_url="$(get_env_file_value MOONBASE_PUBLIC_SERVER_URL)"
+  public_server_url="${public_server_url:-http://jellyfin:8096}"
+
+  configuration="$(curl -sS -f "$JELLYFIN_URL/Plugins/$plugin_id/Configuration" -H "Authorization: $auth")"
+  updated="$(jq \
+    --argjson settings_sync "$settings_sync_enabled" \
+    --argjson seerr_enabled "$seerr_enabled" \
+    --arg seerr_url "$seerr_url" \
+    --arg public_url "$public_server_url" \
+    --arg tmdb_key "${MOONBASE_TMDB_API_KEY:-}" \
+    --arg mdblist_key "${MOONBASE_MDBLIST_API_KEY:-}" '
+      .EnableSettingsSync=$settings_sync |
+      .SeerrEnabled=$seerr_enabled |
+      .SeerrUrl=$seerr_url |
+      .PublicServerUrl=$public_url |
+      if $tmdb_key != "" then .TmdbApiKey=$tmdb_key else . end |
+      if $mdblist_key != "" then .MdblistApiKey=$mdblist_key else . end
+    ' <<<"$configuration")"
+
+  if [[ "$(jq -S . <<<"$configuration")" != "$(jq -S . <<<"$updated")" ]]; then
+    curl -sS -f -X POST "$JELLYFIN_URL/Plugins/$plugin_id/Configuration" \
+      -H "Authorization: $auth" -H 'Content-Type: application/json' \
+      --data-binary "$updated" >/dev/null
+    echo "Moonbase server configuration updated."
+  else
+    echo "Moonbase server configuration verified."
+  fi
+
+  status="$(curl -sS -f "$JELLYFIN_URL/Moonfin/Ping" -H "Authorization: $auth")"
+  jq -e '(.Installed // .installed) == true' <<<"$status" >/dev/null ||
+    fail "Moonbase did not report itself as installed."
+  echo "Moonbase API verified: $(jq -r '.Version // .version' <<<"$status")"
+}
+
+reprovision_moonbase() {
+  [[ "$(moonbase_bool_setting MOONBASE_ENABLED true)" == true ]] || return
+  [[ "$(moonbase_bool_setting MOONBASE_SEERR_ENABLED true)" == true ]] || return
+
+  local session token auth
+  session="$(jellyfin_authenticate)" || fail "Jellyfin authentication failed while reprovisioning Moonbase."
+  token="$(jq -r '.AccessToken' <<<"$session")"
+  [[ -n "$token" && "$token" != null ]] || fail "Jellyfin authentication returned no token."
+  auth="MediaBrowser Token=\"$token\", Client=\"media-stack\", Device=\"bootstrap\", DeviceId=\"media-stack-bootstrap\", Version=\"1.0\""
+  curl -sS -f -X POST "$JELLYFIN_URL/Moonfin/Notifications/Reprovision" \
+    -H "Authorization: $auth" >/dev/null
+  echo "Moonbase Seerr webhook reprovision requested."
+}
+
 configure_jellyfin() {
   local session
   if ! session="$(jellyfin_authenticate 2>/dev/null)"; then
@@ -434,6 +596,7 @@ configure_jellyfin() {
   curl -sS -f -X POST "$JELLYFIN_URL/System/Configuration" \
     -H "Authorization: $auth" -H 'Content-Type: application/json' \
     --data-binary "$(jq --arg name "$server_name" '.ServerName=$name' <<<"$config")" >/dev/null
+  ensure_moonbase_plugin "$auth"
 
   for spec in 'Movies|movies|/data/media/movies' 'Shows|tvshows|/data/media/tv'; do
     IFS='|' read -r name type path <<<"$spec"
@@ -545,6 +708,12 @@ tree.write(path, encoding="utf-8", xml_declaration=True)
 PY
   docker compose restart jellyfin >/dev/null
   wait_url "$JELLYFIN_URL/System/Info/Public" 90
+  session="$(jellyfin_authenticate_with_retry 90)" ||
+    fail "Jellyfin authentication did not become ready within 90 seconds after restart."
+  token="$(jq -r '.AccessToken' <<<"$session")"
+  [[ -n "$token" && "$token" != null ]] || fail "Jellyfin authentication returned no token after restart."
+  auth="MediaBrowser Token=\"$token\", Client=\"media-stack\", Device=\"bootstrap\", DeviceId=\"media-stack-bootstrap\", Version=\"1.0\""
+  configure_moonbase "$auth"
   echo "Jellyfin administrator and baseline configured."
 }
 
@@ -799,6 +968,8 @@ ensure_root_folder() {
 configure_seerr_services() {
   bash ./scripts/bootstrap-seerr.sh "$SONARR_URL" "$RADARR_URL"
   docker compose restart seerr >/dev/null
+  wait_url "$SEERR_URL/api/v1/status" 120
+  reprovision_moonbase
 }
 
 main() {

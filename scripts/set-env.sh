@@ -118,6 +118,8 @@ read_secret BAZARR_PASS "Bazarr UI password" 6
 
 read_value JELLYFIN_USER "Jellyfin administrator username" "admin"
 read_secret JELLYFIN_PASS "Jellyfin administrator password" 6
+read_secret MOONBASE_TMDB_API_KEY "Moonbase server-wide TMDB API key (blank to skip)" 1 0
+read_secret MOONBASE_MDBLIST_API_KEY "Moonbase server-wide MDBList API key (blank to skip)" 1 0
 
 read_value SEERR_EMAIL "Seerr administrator email" "admin@example.invalid"
 
