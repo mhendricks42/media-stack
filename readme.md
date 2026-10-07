@@ -1,8 +1,8 @@
 # media-stack
 
-A self-hosted media automation stack that runs identically on a Linux server and a Windows workstation, so changes can be tested locally before they touch production.
+A self-hosted media automation stack with the same service topology on a Linux server and a Windows workstation, so changes can be tested locally before they touch production.
 
-One base Compose file holds everything platform-neutral. Thin overlays add what each platform needs. Switching between them is a single command, and nothing about the pipeline itself changes when you do.
+One base Compose file holds everything platform-neutral. Thin overlays add target-specific networking, storage, restart, and GPU behavior. Switching between them is a single command; the media pipeline stays the same while the host integration changes.
 
 ```
 ./stack.sh use linux     # production
@@ -76,7 +76,7 @@ Two network domains live on one host and never talk over the network the way you
 
 **The `medianet` bridge** contains everything else. Sonarr and Radarr prefer SABnzbd at `sabnzbd:8080` for Usenet downloads, and keep qBittorrent at `gluetun:8080` as the secondary torrent client. The arr apps never join the swarm, so they do not need the tunnel.
 
-**`/data`** is the handoff. SABnzbd writes to `/data/usenet`, qBittorrent writes to `/data/torrents`, Sonarr and Radarr import into `/data/media`, Jellyfin reads the finished library, and ErsatzTV reads the same media tree to build pseudo-live channels. Coordination over the bridge, files over the filesystem.
+**`/data`** is the handoff. SABnzbd writes to `/data/usenet`, qBittorrent writes to `/data/torrents`, Sonarr and Radarr import into `/data/media`, Jellyfin reads the finished library, and ErsatzTV reads the same media tree to build pseudo-live channels. Coordination happens over the bridge and files move through the shared filesystem. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the cited system map, lifecycle diagrams, and subsystem deep-dives.
 
 ## How the dual-target setup works
 
@@ -128,28 +128,27 @@ $env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/secrets.yml;co
 
 ```
 .
-├── docker-compose.yml          # base — never run alone
-├── compose/
-│   ├── linux.yml               # prod: Tailscale
-│   ├── windows.yml             # dev: optional userspace Tailscale node
-│   ├── secrets.yml             # VPN credentials as container secret files
-│   ├── gpu-intel.yml           # optional: QuickSync
-│   └── gpu-nvidia.yml          # optional: NVENC
-├── env/
+├── ARCHITECTURE.md             # cited architecture and onboarding guide
+├── docker-compose.yml          # platform-neutral service graph
+├── compose/                    # target, secret, and optional GPU overlays
+│   ├── linux.yml / windows.yml
+│   ├── secrets.yml
+│   └── gpu-intel.yml / gpu-nvidia.yml
+├── env/                        # copyable non-secret target templates
 │   ├── linux.env.example
 │   └── windows.env.example
-├── scripts/
-│   ├── bootstrap.sh           # Linux app integrations and setup
-│   ├── bootstrap.ps1          # Windows app integrations and setup
-│   ├── bootstrap-ui-auth.ps1  # UI login provisioning and verification
-│   ├── init-windows-dev.ps1   # WSL data path prep for Windows development
+├── scripts/                    # bootstrap and host setup automation
+│   ├── bootstrap.sh / bootstrap.ps1
+│   ├── bootstrap-ui-auth.ps1 / bootstrap-jellyfin.ps1
+│   ├── bootstrap-seerr.sh / bootstrap-seerr.ps1
 │   ├── import-prowlarr-indexers.ps1
-│   ├── set-env.ps1            # interactive Windows session env helper
-│   └── set-env.sh             # interactive Bash session env helper
-├── config/                     # gitignored — app state lives here
-├── recyclarr.example.yml       # TRaSH Guides templates to sync
-├── stack.sh                    # wrapper (bash)
-├── stack.ps1                   # wrapper (PowerShell)
+│   ├── init-windows-dev.ps1
+│   └── set-env.sh / set-env.ps1
+├── docs/                       # migration, image policy, and history
+├── config/                     # ignored generated application state
+├── indexers.example.json       # declarative Prowlarr indexer example
+├── recyclarr.example.yml       # declarative TRaSH profile baseline
+├── stack.sh / stack.ps1        # operator lifecycle wrappers
 └── .gitignore
 ```
 
@@ -204,7 +203,7 @@ Run `./stack.sh init-vpn` or `.\stack.ps1 init-vpn` separately for NordVPN crede
 
 - `QBIT_PASS` for bootstrap automation
 - `SABNZBD_USER` / `SABNZBD_PASS`
-- optional `ANIMETOSHO_API_KEY`, `NZBGEEK_API_KEY`, and `NZBPLANET_API_KEY` for enabled indexers in `indexers.json`
+- optional `NZBGEEK_API_KEY` and `NZBPLANET_API_KEY` for enabled private indexers in `indexers.json`
 - `SAB_SERVER_HOST` / `SAB_SERVER_USER` / `SAB_SERVER_PASS` for the primary Usenet provider
 - optional `SAB_BACKUP_SERVER_HOST` / `SAB_BACKUP_SERVER_USER` / `SAB_BACKUP_SERVER_PASS` for a backup or block account
 - `TS_AUTHKEY` for a Tailscale overlay or the optional Windows Tailscale container
@@ -482,7 +481,7 @@ If usage jumped by the file size, hardlinks are not working. Fix that before add
 ./stack.sh ps                 # status
 source ./scripts/set-env.sh   # prompt for session env vars
 ./stack.sh setup-data         # create /data/usenet, /data/torrents, and media folders
-./stack.sh bootstrap          # wire Prowlarr, Sonarr, Radarr, SABnzbd, and qBittorrent
+./stack.sh bootstrap          # configure authentication, apps, clients, Jellyfin, and Seerr
 ./stack.sh import-indexers    # import local indexers.json into Prowlarr
 ./stack.sh sync-profiles      # sync TRaSH quality profiles and custom formats
 ./stack.sh doctor             # check Docker, data paths, hardlinks, APIs, and Gluetun
@@ -577,20 +576,20 @@ your phone  ──► Tailscale mesh ◄── server              (both ends di
 internet    ──► router ──╫──  server                   (0 ports forwarded)
 ```
 
-**Nothing ever listens on your public IP.** That is the highest-value control here, and it is why the arr apps' weak default authentication is tolerable — they are only reachable from inside the tailnet.
+**This repository does not configure router port forwarding.** Linux binds service ports to `0.0.0.0` for LAN access, while Windows development binds to `127.0.0.1`; whether a Linux service is publicly reachable still depends on the host firewall, router, and deployment environment. Bootstrap enables application authentication rather than relying on network placement alone.
 
 Worth being precise about scope: Gluetun controls where qBittorrent's traffic *exits*. It does not isolate it laterally. Gluetun sits on `medianet`, so a compromised qBittorrent can reach Sonarr and Jellyfin on the bridge. The tunnel is a privacy control, not a containment boundary.
 
 ### Hardening already applied
 
-- `no-new-privileges:true` on every service
+- `no-new-privileges:true` on application services except the network-control containers Gluetun and Tailscale
 - Jellyfin's media mount is read-only
-- Images currently use `latest` tags by default, except Recyclarr, which publishes no `latest` tag and is pinned to a major version
+- Every current image reference, including Recyclarr and Tailscale, uses a floating `latest` tag
 - No Docker socket mounted anywhere
-- Containers run as `PUID`/`PGID`, not root
+- LinuxServer application images receive `PUID`/`PGID`; Recyclarr has an explicit user, while Gluetun and Tailscale retain the privileges needed for network control
 - Dev binds to loopback only
 
-`cap_drop: ALL` is deliberately omitted. The LinuxServer images use s6-overlay and need `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, and `FOWNER` to start; shipping it enabled would break the stack on first run.
+`cap_drop: ALL` is deliberately omitted. The LinuxServer images use s6-overlay and need `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, and `FOWNER` to start; shipping it enabled would break the stack on first run. Two current gaps should not be mistaken for guarantees: the Gluetun healthcheck is commented out even though qBittorrent declares `condition: service_healthy`, and this branch has no active CI workflow. Restore a real Gluetun healthcheck before relying on startup health gating or `verify`, and validate both target overlays manually with `config`.
 
 ### What to avoid adding
 
@@ -636,7 +635,7 @@ Back up before upgrading. `./stack.sh backup` or `.\stack.ps1 backup` stops the 
 
 **qBittorrent web UI returns "Unauthorized."** qBittorrent 5.x validates the Host header. Set the WebUI's alternative hostname allowlist, or reach it via the address it expects.
 
-**Gluetun healthcheck flapping.** Usually a bad VPN server. Change `VPN_COUNTRY` and restart. Check `./stack.sh logs gluetun` for the actual error before changing anything else.
+**qBittorrent does not start, or `doctor` / `verify` reports that Gluetun is not healthy.** The current base Compose file declares qBittorrent's `condition: service_healthy` but has Gluetun's healthcheck commented out. Restore and validate an active Gluetun healthcheck before treating startup gating or `verify` as authoritative; after that, repeated health failures usually indicate a bad VPN server or tunnel configuration. Check `./stack.sh logs gluetun` before changing anything else.
 
 **Gluetun logs show `AUTH_FAILED`.** The VPN provider rejected `secrets/openvpn_user` or `secrets/openvpn_password`. For NordVPN, use the manual/service credentials for OpenVPN, not necessarily the email/password you use for the website or app. Rerun `./stack.sh init-vpn` (or `.\stack.ps1 init-vpn`), recreate Gluetun, then run `verify` again. Do not create these files with `echo`; its trailing newline becomes part of the credential.
 
@@ -648,4 +647,4 @@ Back up before upgrading. `./stack.sh backup` or `.\stack.ps1 backup` stops the 
 
 This is general-purpose automation. It searches indexes, talks to a download client, renames files, and serves a library. There is nothing infringing about any of that, and there are entirely legitimate uses: organising your own disc rips, managing public-domain and Creative Commons material, keeping self-produced media sorted.
 
-What you point the indexers at is your responsibility. This repo does not recommend, configure, or ship any indexer. Check the law where you live.
+What you point the indexers at is your responsibility. This repo ships an editable `indexers.example.json` with example public indexer definitions and can import the enabled entries into Prowlarr; review and change that file for your own lawful use before importing it. Check the law where you live.
