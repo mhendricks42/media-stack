@@ -89,12 +89,19 @@ wait_url() {
   local seconds="$2"
   local attempt
   for ((attempt = 0; attempt < seconds; attempt++)); do
-    if curl -sS -o /dev/null --max-time 5 "$url"; then
+    if curl -s -o /dev/null --max-time 5 "$url"; then
       return
     fi
     sleep 1
   done
   fail "$url did not become ready within $seconds seconds."
+}
+
+check_seerr_config_write_access() {
+  if ! docker compose run --rm --no-deps --entrypoint sh seerr -c \
+    'touch /app/config/.media-stack-write-test && rm -f /app/config/.media-stack-write-test'; then
+    fail "Seerr cannot write to config/seerr as UID/GID 1000:1000. Remove inherited deny ACLs, restore ownership, and rerun bootstrap: sudo setfacl -Rb config/seerr; sudo chown -R 1000:1000 config/seerr; sudo chmod -R u+rwX,g+rX,o-rwx config/seerr"
+  fi
 }
 
 configure_qbittorrent() {
@@ -154,11 +161,17 @@ PY
   fi
   docker compose up -d qbittorrent >/dev/null
   wait_url "$QBIT_URL" 60
-  local result
-  result="$(curl -sS --max-time 10 -X POST \
+  local result status
+  result="$(mktemp)"
+  status="$(curl -sS --max-time 10 -o "$result" -w '%{http_code}' -X POST \
     --data-urlencode "username=$QBIT_USER" --data-urlencode "password=$QBIT_PASS" \
     "$QBIT_URL/api/v2/auth/login")"
-  [[ "$result" == 'Ok.' ]] || fail "qBittorrent rejected QBIT_USER/QBIT_PASS."
+  if [[ "$status" -lt 200 || "$status" -ge 300 ]] ||
+    [[ -s "$result" && "$(<"$result")" != 'Ok.' ]]; then
+    rm -f "$result"
+    fail "qBittorrent rejected QBIT_USER/QBIT_PASS (HTTP $status)."
+  fi
+  rm -f "$result"
   echo "qBittorrent credentials, paths, and seeding limits configured."
 }
 
@@ -363,7 +376,14 @@ jellyfin_authenticate() {
 configure_jellyfin() {
   local session
   if ! session="$(jellyfin_authenticate 2>/dev/null)"; then
-    curl -sS -f "$JELLYFIN_URL/Startup/User" -H "Authorization: $JELLYFIN_CLIENT" >/dev/null
+    local startup_status
+    startup_status="$(curl -s -o /dev/null -w '%{http_code}' "$JELLYFIN_URL/Startup/User" \
+      -H "Authorization: $JELLYFIN_CLIENT")"
+    if [[ "$startup_status" == 401 || "$startup_status" == 403 ]]; then
+      fail "Jellyfin is already initialized and rejected JELLYFIN_USER/JELLYFIN_PASS. Supply the existing administrator credentials or reset that account before rerunning bootstrap."
+    fi
+    [[ "$startup_status" -ge 200 && "$startup_status" -lt 300 ]] ||
+      fail "Jellyfin first-run endpoint failed with HTTP $startup_status."
     curl -sS -f -X POST "$JELLYFIN_URL/Startup/User" \
       -H "Authorization: $JELLYFIN_CLIENT" -H 'Content-Type: application/json' \
       --data-binary "$(jq -nc --arg user "$JELLYFIN_USER" --arg pass "$JELLYFIN_PASS" '{Name:$user,Password:$pass}')" >/dev/null
@@ -727,6 +747,7 @@ main() {
   require_command python3
   require_command docker
   require_environment
+  check_seerr_config_write_access
 
   export SONARR_API_KEY RADARR_API_KEY PROWLARR_API_KEY SABNZBD_API_KEY
   SONARR_API_KEY="$(get_api_key config/sonarr/config.xml)"

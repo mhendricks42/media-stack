@@ -245,7 +245,7 @@ source ./scripts/set-env.sh --include-tailscale
 mkdir -p config/seerr && sudo chown -R 1000:1000 config/seerr
 ```
 
-`init-vpn` stores the Nord OpenVPN credentials in ignored files with no trailing newline and restrictive Linux permissions. Seerr always runs as UID 1000 regardless of `PUID`, so its config directory needs that owner explicitly. Keep the same terminal open after `set-env.sh`; the remaining bootstrap and Tailscale secrets live only in that shell session.
+`init-vpn` stores the Nord OpenVPN credentials in ignored files with no trailing newline and restrictive Linux permissions. Seerr always runs as UID/GID 1000:1000 regardless of `PUID`/`PGID`, so its config directory needs that ownership explicitly. NAS platforms may attach inherited ACLs that override ordinary mode bits; if `ls -ld config/seerr` ends with `+` and Seerr reports `EACCES`, run `sudo setfacl -Rb config/seerr`, restore ownership with `sudo chown -R 1000:1000 config/seerr`, and restrict modes with `sudo chmod -R u+rwX,g+rX,o-rwx config/seerr`. Keep the same terminal open after `set-env.sh`; the remaining bootstrap and Tailscale secrets live only in that shell session.
 
 **4. Check the merged file before starting.** This catches typos and missing variables without creating anything:
 
