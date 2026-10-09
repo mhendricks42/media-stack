@@ -39,7 +39,7 @@ bootstrap wiring, operational checks, and cross-platform wrappers.
 There is no compiled backend or frontend entry point. Operators enter through:
 
 1. `stack.sh` on Linux, whose command dispatcher starts at
-   [stack.sh](stack.sh#L277-L447).
+   [stack.sh](stack.sh#L274-L452).
 2. `stack.ps1` on Windows, whose command dispatcher starts at
    [stack.ps1](stack.ps1#L367-L562).
 3. `docker compose` directly, with `COMPOSE_FILE` selected by `.env`
@@ -57,19 +57,20 @@ are loaded by sourcing `scripts/set-env.sh`.
 
 | Command | Purpose | Evidence / status |
 |---|---|---|
-| `./stack.sh use linux` / `.\stack.ps1 use windows` | Replace `.env` with the selected platform template | [stack.sh](stack.sh#L278-L287), [stack.ps1](stack.ps1#L368-L374) |
+| `./stack.sh use linux` / `.\stack.ps1 use windows` | Replace `.env` with the selected platform template | [stack.sh](stack.sh#L279-L288), [stack.ps1](stack.ps1#L368-L374) |
 | `source ./scripts/set-env.sh` / `.\stack.ps1 env` | Prompt for session-scoped application credentials | [readme.md](readme.md#L165-L217), [stack.ps1](stack.ps1#L438-L450) |
-| `./stack.sh init-vpn` / `.\stack.ps1 init-vpn` | Create ignored, newline-free VPN secret files with restrictive permissions | [stack.sh](stack.sh#L50-L93), [stack.ps1](stack.ps1#L66-L147) |
-| `./stack.sh config` / `.\stack.ps1 config` | Render the active merged Compose model and redact selected secret fields | [stack.sh](stack.sh#L371-L375), [stack.ps1](stack.ps1#L484-L493) |
+| `./stack.sh init-vpn` / `.\stack.ps1 init-vpn` | Create ignored, newline-free VPN secret files with restrictive permissions | [stack.sh](stack.sh#L51-L94), [stack.ps1](stack.ps1#L66-L147) |
+| `./stack.sh install-service` | Install the Linux systemd lifecycle unit and Docker storage-ordering drop-in; optionally enable autoheal | [stack.sh](stack.sh#L292-L295), [scripts/install-systemd.sh](scripts/install-systemd.sh#L1-L219) |
+| `./stack.sh config` / `.\stack.ps1 config` | Render the active merged Compose model and redact selected secret fields | [stack.sh](stack.sh#L376-L381), [stack.ps1](stack.ps1#L484-L493) |
 | `docker compose --env-file env\<target>.env.example -f ... config --quiet` | Non-mutating Compose syntax/merge check; both Linux and Windows variants passed while writing this document | Overlay composition is defined in [env/linux.env.example](env/linux.env.example#L1-L8) and [env/windows.env.example](env/windows.env.example#L1-L9) |
-| `./stack.sh up` / `.\stack.ps1 up` | Validate runtime secrets, then start services detached | [stack.sh](stack.sh#L291-L295), [stack.ps1](stack.ps1#L387-L391) |
-| `./stack.sh setup-data` / `.\stack.ps1 setup-data` | Create the shared `/data` directory contract without changing existing paths | [stack.sh](stack.sh#L305-L336), [stack.ps1](stack.ps1#L401-L436) |
-| `./stack.sh bootstrap` / `.\stack.ps1 bootstrap` | Configure credentials, integrations, clients, root folders, Jellyfin, and Seerr | [stack.sh](stack.sh#L338-L340), [stack.ps1](stack.ps1#L452-L455) |
-| `./stack.sh import-indexers [path] --dry-run` / PowerShell equivalent | Render or apply Prowlarr indexers from local JSON | [stack.sh](stack.sh#L342-L359), [stack.ps1](stack.ps1#L456-L470) |
-| `./stack.sh sync-profiles --preview` / PowerShell equivalent | Preview or apply Recyclarr quality profiles | [stack.sh](stack.sh#L187-L210), [stack.ps1](stack.ps1#L164-L193) |
-| `./stack.sh doctor` / `.\stack.ps1 doctor` | Check target selection, secrets, Compose rendering, containers, paths, hardlinks, tunnel state, and endpoints | [stack.sh](stack.sh#L217-L274), [stack.ps1](stack.ps1#L211-L280) |
-| `./stack.sh verify` / `.\stack.ps1 verify` | Check tunnel health, inspect-time VPN credential exposure, and distinct host/VPN public IPs | [stack.sh](stack.sh#L395-L432), [stack.ps1](stack.ps1#L523-L558) |
-| `./stack.sh backup` / `.\stack.ps1 backup` | Stop services, archive sensitive deployment state, then restart | [stack.sh](stack.sh#L434-L442), [stack.ps1](stack.ps1#L513-L521) |
+| `./stack.sh up` / `.\stack.ps1 up` | Validate runtime secrets, then start services detached | [stack.sh](stack.sh#L296-L301), [stack.ps1](stack.ps1#L387-L391) |
+| `./stack.sh setup-data` / `.\stack.ps1 setup-data` | Create the shared `/data` directory contract without changing existing paths | [stack.sh](stack.sh#L310-L342), [stack.ps1](stack.ps1#L401-L436) |
+| `./stack.sh bootstrap` / `.\stack.ps1 bootstrap` | Configure credentials, integrations, clients, root folders, Jellyfin, and Seerr | [stack.sh](stack.sh#L343-L346), [stack.ps1](stack.ps1#L452-L455) |
+| `./stack.sh import-indexers [path] --dry-run` / PowerShell equivalent | Render or apply Prowlarr indexers from local JSON | [stack.sh](stack.sh#L347-L365), [stack.ps1](stack.ps1#L456-L470) |
+| `./stack.sh sync-profiles --preview` / PowerShell equivalent | Preview or apply Recyclarr quality profiles | [stack.sh](stack.sh#L188-L211), [stack.ps1](stack.ps1#L164-L193) |
+| `./stack.sh doctor` / `.\stack.ps1 doctor` | Check target selection, secrets, Compose rendering, containers, paths, hardlinks, tunnel state, and endpoints | [stack.sh](stack.sh#L218-L273), [stack.ps1](stack.ps1#L211-L280) |
+| `./stack.sh verify` / `.\stack.ps1 verify` | Check tunnel health, inspect-time VPN credential exposure, and distinct host/VPN public IPs | [stack.sh](stack.sh#L400-L438), [stack.ps1](stack.ps1#L523-L558) |
+| `./stack.sh backup` / `.\stack.ps1 backup` | Stop services, archive sensitive deployment state, then restart | [stack.sh](stack.sh#L439-L447), [stack.ps1](stack.ps1#L513-L521) |
 | Unit/single-test command | None exists. This repository has operational smoke checks rather than a unit-test framework. | [INFERRED] Current tracked scripts and documented command list at [readme.md](readme.md#L477-L499) |
 | Lint / format / typecheck | No canonical command is defined. PowerShell files did pass parser validation while this document was written. | [INFERRED] No manifest/task-runner command; wrapper usage is enumerated at [stack.ps1](stack.ps1#L17-L29) |
 | CI workflow | No workflow is present in this checkout. A historical summary describes one on a separate `ci/compose-validation` branch, not in the current branch. | [Resolved contradiction] [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md#L128-L169) |
@@ -135,20 +136,20 @@ container image is currently immutable or even version-pinned.
    ([docker-compose.yml](docker-compose.yml#L179-L187)). The README now correctly
    reports that every image floats on `latest`
    ([readme.md](readme.md#L583-L588)); the Compose comment remains stale.
-4. **Gluetun health semantics are internally inconsistent.** The healthcheck is
-   commented out, while qBittorrent waits for `service_healthy`
-   ([docker-compose.yml](docker-compose.yml#L37-L50)). Both `doctor` and `verify`
-   also require a literal `healthy` state
-   ([stack.sh](stack.sh#L260-L266), [stack.sh](stack.sh#L399-L411)).
-   Compose rendering succeeds because this is semantic drift, not YAML syntax
-   failure.
-5. **[Resolved contradiction] Historical fix claims are not current behavior.**
-   The implementation summary says the healthcheck and pinned-image changes were
-   completed on separate branches
+4. **Gluetun health is an active startup contract.** The base service checks
+   Gluetun's local health endpoint, while qBittorrent waits for
+   `service_healthy` ([docker-compose.yml](docker-compose.yml#L37-L53)). Both
+   `doctor` and `verify` also require a literal `healthy` state
+   ([stack.sh](stack.sh#L261-L267), [stack.sh](stack.sh#L404-L416)). The optional
+   autoheal overlay can restart Gluetun after it becomes unhealthy
+   ([compose/autoheal.yml](compose/autoheal.yml#L1-L4)).
+5. **[Resolved contradiction] Historical image-fix claims are not current
+   behavior.** The implementation summary says healthcheck and pinned-image
+   changes were completed on separate branches
    ([docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md#L15-L32),
    [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md#L74-L104)).
-   The checked-out source shows those changes are absent, so the summary is
-   historical rather than a reliable current-state inventory.
+   The healthcheck has now been restored independently, while the checked-out
+   image references remain authoritative over historical version claims.
 6. **Readarr is deliberately excluded.** The README says it was archived in
    2025 ([readme.md](readme.md#L35-L52)). The archive date is
    **[UNVERIFIED]** because this document did not use a remote source.
@@ -187,7 +188,7 @@ container image is currently immutable or even version-pinned.
 | HEAD | `c3e613c38480af3b9f10201157ff7bc7306a7b0c` — `fix: enhance Seerr configuration checks and improve error handling in bootstrap script` | High |
 | HEAD timestamp | `2026-10-06T20:26:44-04:00` | High |
 | Project version | No repository semantic version; runtime versions float with image tags | High |
-| License | No license file is tracked. The README contains a legal-use statement, not a software license. | High; [readme.md](readme.md#L646-L650) |
+| License | No license file is tracked. The README contains a legal-use statement, not a software license. | High; [readme.md](readme.md#L673-L677) |
 | Working tree | Dirty before documentation work; pre-existing edits were not changed | High |
 
 ### Repository-specific guidance
@@ -293,7 +294,7 @@ sequenceDiagram
 
 1. **Operator façade → orchestration:** wrappers validate host/runtime state and
    delegate to Compose or scripts; callers should not reproduce their checks
-   ad hoc ([stack.sh](stack.sh#L277-L447)).
+   ad hoc ([stack.sh](stack.sh#L274-L452)).
 2. **Compose → upstream services:** the base model owns platform-neutral
    topology; overlays may add target-specific resources but should not duplicate
    whole service definitions ([readme.md](readme.md#L81-L125)).
@@ -317,11 +318,11 @@ enforces them.
 | Concern | Implementation | Evidence |
 |---|---|---|
 | Authentication | Bootstrap configures Forms/UI users and application credentials from session variables | [scripts/bootstrap.sh](scripts/bootstrap.sh#L22-L40), [scripts/bootstrap.ps1](scripts/bootstrap.ps1#L32-L59) |
-| API authorization | API keys are read from generated local configs; Recyclarr receives them only for the command invocation | [stack.sh](stack.sh#L168-L210), [stack.ps1](stack.ps1#L149-L193) |
+| API authorization | API keys are read from generated local configs; Recyclarr receives them only for the command invocation | [stack.sh](stack.sh#L169-L211), [stack.ps1](stack.ps1#L149-L193) |
 | Secrets | VPN credentials use Compose secret files; other credentials remain process-scoped environment variables | [compose/secrets.yml](compose/secrets.yml#L1-L14), [readme.md](readme.md#L165-L217) |
 | Configuration | `.env` selects overlays and non-secret defaults; `config/` is generated state; JSON/YAML examples provide declarative intent | [readme.md](readme.md#L127-L155) |
 | Error handling | Both wrapper families fail fast; API helpers surface status and redact common secret fields | [stack.sh](stack.sh#L1-L2), [scripts/bootstrap.sh](scripts/bootstrap.sh#L62-L91), [stack.ps1](stack.ps1#L8-L15) |
-| Logging | Operators follow upstream container logs through wrapper commands; no centralized aggregation exists | [stack.sh](stack.sh#L377-L380), [stack.ps1](stack.ps1#L495-L498) |
+| Logging | Operators follow upstream container logs through wrapper commands; no centralized aggregation exists | [stack.sh](stack.sh#L382-L386), [stack.ps1](stack.ps1#L495-L498) |
 | Metrics/tracing | None defined in this checkout | [INFERRED] No observability service or exporter is present in Compose. |
 | Feature flags | Compose profiles gate Recyclarr and optional Windows Tailscale; GPU capabilities are overlay-selected | [docker-compose.yml](docker-compose.yml#L186-L189), [compose/windows.yml](compose/windows.yml#L5-L9), [readme.md](readme.md#L112-L125) |
 | Security hardening | Most application containers set `no-new-privileges`; Jellyfin media is read-only; qBittorrent is namespace-isolated | [docker-compose.yml](docker-compose.yml#L45-L61), [docker-compose.yml](docker-compose.yml#L147-L162) |
@@ -428,7 +429,7 @@ stateDiagram-v2
 `use` copies a complete template over `.env`; Compose then follows
 `COMPOSE_FILE` without extra flags. Before state-changing operations, wrappers
 verify Docker availability and required secrets
-([stack.sh](stack.sh#L32-L133), [stack.ps1](stack.ps1#L54-L147)).
+([stack.sh](stack.sh#L33-L134), [stack.ps1](stack.ps1#L54-L147)).
 The two implementations are analogous but not generated from one source, so
 behavioral drift is possible—for example, PowerShell can auto-start Docker
 Desktop and initialize WSL storage, while Bash can attempt to start a systemd
@@ -498,9 +499,12 @@ The architecture is stronger than an application-level proxy because
 qBittorrent has no independent interface. `doctor` then tests the filesystem
 assumptions by creating and checking a real hardlink
 ([stack.ps1](stack.ps1#L244-L280)). `verify` tests the external egress seam
-([stack.ps1](stack.ps1#L523-L558)). However, the commented Gluetun healthcheck
-currently breaks the intended health contract and must be treated as a known
-operational defect, not as a documentation detail.
+([stack.ps1](stack.ps1#L523-L558)). The base Gluetun healthcheck enforces
+startup ordering. On Linux, the optional autoheal overlay extends that contract
+by monitoring labeled unhealthy containers, while the systemd installation
+orders Docker itself after both the checkout/config and media-data mounts
+([compose/autoheal.yml](compose/autoheal.yml#L1-L57),
+[systemd/docker-storage.conf.template](systemd/docker-storage.conf.template#L1-L5)).
 
 ## Confidence assessment
 

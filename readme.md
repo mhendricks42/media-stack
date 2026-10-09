@@ -589,11 +589,11 @@ Worth being precise about scope: Gluetun controls where qBittorrent's traffic *e
 - LinuxServer application images receive `PUID`/`PGID`; Recyclarr has an explicit user, while Gluetun and Tailscale retain the privileges needed for network control
 - Dev binds to loopback only
 
-`cap_drop: ALL` is deliberately omitted. The LinuxServer images use s6-overlay and need `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, and `FOWNER` to start; shipping it enabled would break the stack on first run. Two current gaps should not be mistaken for guarantees: the Gluetun healthcheck is commented out even though qBittorrent declares `condition: service_healthy`, and this branch has no active CI workflow. Restore a real Gluetun healthcheck before relying on startup health gating or `verify`, and validate both target overlays manually with `config`.
+`cap_drop: ALL` is deliberately omitted. The LinuxServer images use s6-overlay and need `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, and `FOWNER` to start; shipping it enabled would break the stack on first run. Gluetun has an active local health endpoint check, so qBittorrent's `condition: service_healthy` gates startup on VPN health. This branch has no active CI workflow, so validate both target overlays manually with `config`.
 
 ### What to avoid adding
 
-**Do not mount `/var/run/docker.sock`.** Watchtower, Portainer, and some dashboards ask for it. Anything holding that socket can start a privileged container mounting `/`, and is therefore root on the host. It is the single worst amplifier available. If you want automated updates, use a socket proxy with a read-only allowlist, or accept monthly manual pulls.
+**Avoid mounting `/var/run/docker.sock`.** Watchtower, Portainer, and some dashboards ask for it. Anything holding that socket can start a privileged container mounting `/`, and is therefore root on the host. The optional autoheal overlay is a narrowly scoped exception: it is disabled by default, watches only labeled services, and still carries host-root-equivalent risk even with a `:ro` mount. See [the Linux systemd and autoheal guide](docs/LINUX_SYSTEMD_SERVICE.md) before enabling it.
 
 **Think twice about FlareSolverr.** It is a headless Chromium that visits indexer sites and executes whatever JavaScript they serve. Add it only if an indexer genuinely requires it, and remove it when it does not.
 
@@ -635,13 +635,40 @@ Back up before upgrading. `./stack.sh backup` or `.\stack.ps1 backup` stops the 
 
 **qBittorrent web UI returns "Unauthorized."** qBittorrent 5.x validates the Host header. Set the WebUI's alternative hostname allowlist, or reach it via the address it expects.
 
-**qBittorrent does not start, or `doctor` / `verify` reports that Gluetun is not healthy.** The current base Compose file declares qBittorrent's `condition: service_healthy` but has Gluetun's healthcheck commented out. Restore and validate an active Gluetun healthcheck before treating startup gating or `verify` as authoritative; after that, repeated health failures usually indicate a bad VPN server or tunnel configuration. Check `./stack.sh logs gluetun` before changing anything else.
+**qBittorrent does not start, or `doctor` / `verify` reports that Gluetun is not healthy.** qBittorrent waits for Gluetun's local health endpoint. Repeated failures usually indicate a bad VPN server, failed tunnel, or unavailable Gluetun health server. Check `./stack.sh logs gluetun` before changing anything else.
 
 **Gluetun logs show `AUTH_FAILED`.** The VPN provider rejected `secrets/openvpn_user` or `secrets/openvpn_password`. For NordVPN, use the manual/service credentials for OpenVPN, not necessarily the email/password you use for the website or app. Rerun `./stack.sh init-vpn` (or `.\stack.ps1 init-vpn`), recreate Gluetun, then run `verify` again. Do not create these files with `echo`; its trailing newline becomes part of the credential.
 
 **Subnet route works at home, breaks at a cafe.** Subnet collision — the cafe's network uses the same range you advertised, and the local route wins. This is why `linux.env.example` suggests `10.73.42.0/24` rather than `192.168.1.0/24`. Renumbering later is annoying; do it before you have static leases.
 
 **Tailscale silently stopped working after months.** Node key expiry. Disable it on the node in the admin console.
+
+## Linux service and reboot recovery
+
+After completing and verifying the initial Linux deployment, install it as a
+systemd-managed service:
+
+```bash
+./stack.sh install-service
+```
+
+The installer generates a unit for the current checkout and a Docker service
+drop-in that requires both the checkout/config path and `DATA_ROOT` to be
+mounted before Docker restores containers. It enables normal `systemctl`
+lifecycle control without storing the Tailscale auth key in `.env`.
+
+An optional autoheal overlay adds application health checks and restarts only
+explicitly labeled unhealthy containers:
+
+```bash
+./stack.sh install-service --enable-autoheal
+```
+
+Autoheal requires the Docker socket and therefore has host-root-equivalent
+access even though the socket is mounted `:ro`. It is disabled by default. Read
+[the Linux systemd and autoheal guide](docs/LINUX_SYSTEMD_SERVICE.md) for the
+threat model, custom paths, reboot test, NAS power recovery, troubleshooting,
+and uninstall steps.
 
 ## Legal
 

@@ -1,0 +1,5 @@
+[Unit]
+# Docker restart policies act before media-stack.service. Requiring the data
+# mounts here prevents Docker from recreating stack containers against empty
+# config or media mountpoints during boot.
+RequiresMountsFor=@@WORKING_DIRECTORY@@ @@DATA_ROOT@@

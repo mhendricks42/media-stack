@@ -11,7 +11,8 @@ services:
     volumes:
       - ./config/tailscale:/var/lib/tailscale
     environment:
-      - TS_AUTHKEY=${TS_AUTHKEY:?Set TS_AUTHKEY in your shell environment, not in .env}
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
+      - TS_AUTH_ONCE=true
       - TS_STATE_DIR=/var/lib/tailscale
       - TS_ROUTES=${TS_ROUTES}
       - TS_ACCEPT_DNS=false

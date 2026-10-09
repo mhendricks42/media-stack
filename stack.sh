@@ -6,6 +6,7 @@ usage() {
 Usage:
   ./stack.sh use <linux|windows>
   ./stack.sh init-vpn
+  ./stack.sh install-service [systemd installer options]
   ./stack.sh up|down|ps|pull|config
   ./stack.sh setup-data
   source ./scripts/set-env.sh [--include-tailscale]
@@ -287,6 +288,10 @@ case "$cmd" in
     ;;
   init-vpn)
     init_vpn_secrets
+    ;;
+  install-service)
+    shift
+    bash ./scripts/install-systemd.sh "$@"
     ;;
   up)
     check_docker_engine

@@ -1,0 +1,25 @@
+[Unit]
+Description=Media Stack Docker Compose application
+Documentation=https://github.com/mhendricks42/media-stack
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+RequiresMountsFor=@@WORKING_DIRECTORY@@ @@DATA_ROOT@@
+ConditionPathExists=@@WORKING_DIRECTORY@@/.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=@@SERVICE_USER@@
+Group=@@SERVICE_GROUP@@
+WorkingDirectory=@@WORKING_DIRECTORY@@
+Environment=MEDIA_STACK_NO_DOCKER_AUTOSTART=1
+ExecStartPre=@@DOCKER_PATH@@ compose config --quiet
+ExecStart=@@DOCKER_PATH@@ compose up -d --remove-orphans
+ExecReload=@@DOCKER_PATH@@ compose up -d --remove-orphans
+ExecStop=@@DOCKER_PATH@@ compose stop
+TimeoutStartSec=0
+TimeoutStopSec=300
+
+[Install]
+WantedBy=multi-user.target
