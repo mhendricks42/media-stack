@@ -1,0 +1,35 @@
+apiVersion: media-stack.dev/v1alpha1
+kind: MediaStack
+metadata:
+  name: home-media
+spec:
+  platform: linux
+  releaseChannel: stable
+  storage:
+    root: /data
+    requireHardlinks: true
+  features:
+    movies: true
+    television: true
+    subtitles: true
+    liveTv: true
+    torrents: true
+    usenet: true
+  networking:
+    bindMode: lan
+    remoteAccess: tailscale
+    lanSubnet: 192.168.1.0/24
+  acceleration:
+    mode: intel-quick-sync
+  jellyfin:
+    serverName: Media Stack
+    moonbase:
+      enabled: true
+      version: 2.4.0.0
+      settingsSync: true
+      seerrIntegration: true
+  secrets:
+    provider: interactive-session
+    references:
+      vpnUsername: openvpn-user-file
+      vpnPassword: openvpn-password-file

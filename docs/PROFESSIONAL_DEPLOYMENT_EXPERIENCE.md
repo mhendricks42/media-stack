@@ -1,8 +1,26 @@
 # Professional Deployment and Maintenance Experience
 
-**Status:** Proposed  
+**Status:** Initial CLI implementation complete; advanced discovery, safe
+restore/rollback, release manifests, full profile-based service pruning, and a
+local web interface remain planned.
 **Purpose:** Implementation specification for a guided, adaptive, and maintainable media-stack experience  
 **Primary audience:** Maintainers implementing the feature and operators reviewing its behavior
+
+## Implementation status
+
+| Capability | Status | Current behavior |
+|---|---|---|
+| Cross-platform CLI foundation | Implemented | `cmd/media-stack` builds for Windows and Linux and delegates mutations to the existing wrappers. |
+| Strict desired state and profiles | Implemented | Versioned YAML, unknown-field rejection, validation, examples, and five guided profiles. |
+| Discovery and deterministic planning | Initial implementation | Detects platform, Docker/Compose, target, state directories, and occupied service ports; GPU, filesystem, hardlink, and service API inspection remain deferred. |
+| Plan-before-apply safety | Implemented | Versioned plans, desired/actual hashes, blockers, explicit approval, and stale-plan rejection. |
+| Resumable workflows | Implemented | Redacted mode-`600` journals, dependency ordering, postcondition verification, and resume. |
+| Existing deployment adoption | Implemented | Read-only `.env` inference, secret references, backup helper, reviewable plan, and migration guide. |
+| Status, doctor, logs, and repair | Initial implementation | Bounded Compose status probes, operation status, guarded component restart, and wrapper logs; the full integration/version/backup health model remains deferred. |
+| Backup and update | Implemented with wrapper semantics | Explicit approval is required; update runs backup before image pull/reconcile/prune. |
+| Restore and rollback | Safety-blocked | Commands fail explicitly until archive validation and application downgrade compatibility are implemented. |
+| Profile-driven service pruning | Deferred | Profiles record desired intent but do not yet remove services from the Compose topology. |
+| TUI/local web interface | Deferred | The initial release is a command-line interface. |
 
 ## 1. Summary
 
@@ -883,4 +901,3 @@ Every PR contributing to this feature must:
 - include an objective verification step;
 - avoid unrelated script rewrites; and
 - update this document when a listed decision or phase changes materially.
-

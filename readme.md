@@ -16,6 +16,7 @@ One base Compose file holds everything platform-neutral. Thin overlays add targe
 - [What this runs](#what-this-runs)
 - [Architecture](#architecture)
 - [How the dual-target setup works](#how-the-dual-target-setup-works)
+- [Professional deployment CLI](#professional-deployment-cli)
 - [Repository layout](#repository-layout)
 - [Prerequisites](#prerequisites)
 - [Secrets](#secrets)
@@ -124,6 +125,42 @@ On Windows, the equivalent separator is `;`:
 $env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/secrets.yml;compose/gpu-nvidia.yml'
 ```
 
+## Professional deployment CLI
+
+The Go-based `media-stack` CLI adds desired state, environment discovery,
+reviewable plans, stale-plan rejection, resumable operation journals, guided
+profiles, adoption, and guarded maintenance commands while retaining
+`stack.sh` and `stack.ps1` as the execution adapters.
+
+Build and test:
+
+```bash
+go test ./...
+go build -o media-stack ./cmd/media-stack
+```
+
+Create a new desired-state file:
+
+```bash
+./media-stack configure --profile recommended --platform linux \
+  --name home-media --data-root /data --write media-stack.yaml
+./media-stack plan --state media-stack.yaml
+./media-stack install --state media-stack.yaml
+```
+
+`install` saves a reviewable plan but does not apply it unless both `--apply`
+and `--yes` are supplied. For an existing deployment, use the non-mutating
+migration helper:
+
+```bash
+./scripts/migrate-deployment.sh
+```
+
+See [the existing-deployment migration guide](docs/MIGRATING_TO_DEPLOYMENT_CLI.md)
+for backups, adoption, plan review, apply/resume, maintenance, and rollback
+steps. [`media-stack.example.yaml`](media-stack.example.yaml) documents the
+desired-state shape.
+
 ## Repository layout
 
 ```
@@ -145,6 +182,9 @@ $env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/secrets.yml;co
 │   ├── init-windows-dev.ps1
 │   └── set-env.sh / set-env.ps1
 ├── docs/                       # migration, image policy, and history
+├── cmd/media-stack/            # professional deployment CLI entry point
+├── internal/                   # desired state, discovery, plans, workflow, adapters
+├── media-stack.example.yaml    # non-secret desired-state example
 ├── config/                     # ignored generated application state
 ├── indexers.example.json       # declarative Prowlarr indexer example
 ├── recyclarr.example.yml       # declarative TRaSH profile baseline

@@ -22,6 +22,7 @@ bootstrap wiring, operational checks, and cross-platform wrappers.
 
 | Layer | Technology | Evidence |
 |---|---|---|
+| Deployment coordinator | Go 1.22 CLI with YAML desired state, deterministic plans, and resumable operation journals | [go.mod](go.mod#L1-L7), [cmd/media-stack/main.go](cmd/media-stack/main.go#L47-L96), [internal/workflow/workflow.go](internal/workflow/workflow.go#L71-L128) |
 | Container orchestration | Docker Engine 24+ and Docker Compose plugin | [readme.md](readme.md#L157-L163) |
 | Deployment definition | Compose base file plus target, secret, and optional GPU overlays | [readme.md](readme.md#L81-L125), [docker-compose.yml](docker-compose.yml#L1-L10) |
 | Windows automation | PowerShell wrapper and idempotent bootstrap scripts | [stack.ps1](stack.ps1#L1-L29), [scripts/bootstrap.ps1](scripts/bootstrap.ps1#L1-L25) |
@@ -36,16 +37,19 @@ bootstrap wiring, operational checks, and cross-platform wrappers.
 
 ### Entry points
 
-There is no compiled backend or frontend entry point. Operators enter through:
+There is no web backend or frontend entry point. Operators enter through:
 
-1. `stack.sh` on Linux, whose command dispatcher starts at
+1. The compiled `media-stack` CLI, whose command router starts at
+   [cmd/media-stack/main.go](cmd/media-stack/main.go#L47-L96). It coordinates
+   desired state and delegates mutations to the existing platform wrappers.
+2. `stack.sh` on Linux, whose command dispatcher starts at
    [stack.sh](stack.sh#L274-L452).
-2. `stack.ps1` on Windows, whose command dispatcher starts at
+3. `stack.ps1` on Windows, whose command dispatcher starts at
    [stack.ps1](stack.ps1#L367-L562).
-3. `docker compose` directly, with `COMPOSE_FILE` selected by `.env`
+4. `docker compose` directly, with `COMPOSE_FILE` selected by `.env`
    ([env/linux.env.example](env/linux.env.example#L1-L8),
    [env/windows.env.example](env/windows.env.example#L1-L9)).
-4. The application HTTP UIs and APIs exposed on host ports defined in
+5. The application HTTP UIs and APIs exposed on host ports defined in
    [docker-compose.yml](docker-compose.yml#L24-L27) and
    [docker-compose.yml](docker-compose.yml#L64-L215).
 
@@ -57,6 +61,12 @@ are loaded by sourcing `scripts/set-env.sh`.
 
 | Command | Purpose | Evidence / status |
 |---|---|---|
+| `go test ./...` | Run the CLI unit and workflow test suites | [go.mod](go.mod#L1-L7), [cmd/media-stack/main_test.go](cmd/media-stack/main_test.go), [internal/planner/planner_test.go](internal/planner/planner_test.go) |
+| `go test ./internal/planner -run TestBuildDeterministic` | Run one named Go test | [internal/planner/planner_test.go](internal/planner/planner_test.go#L18-L37) |
+| `go vet ./...` / `go fmt ./...` | Static analysis and canonical formatting for Go packages | [go.mod](go.mod#L1-L7) |
+| `go build -o media-stack ./cmd/media-stack` | Build the professional deployment coordinator | [cmd/media-stack/main.go](cmd/media-stack/main.go#L29-L45) |
+| `media-stack configure`, `plan`, `install`, `apply`, `resume` | Create desired state, review deterministic changes, and run or resume a journaled deployment | [cmd/media-stack/main.go](cmd/media-stack/main.go#L102-L409), [internal/workflow/workflow.go](internal/workflow/workflow.go#L71-L128) |
+| `media-stack adopt` / `scripts/migrate-deployment.*` | Infer non-secret desired state from an existing deployment and produce a reviewable migration plan without applying it | [cmd/media-stack/main.go](cmd/media-stack/main.go#L410-L453), [docs/MIGRATING_TO_DEPLOYMENT_CLI.md](docs/MIGRATING_TO_DEPLOYMENT_CLI.md) |
 | `./stack.sh use linux` / `.\stack.ps1 use windows` | Replace `.env` with the selected platform template | [stack.sh](stack.sh#L279-L288), [stack.ps1](stack.ps1#L368-L374) |
 | `source ./scripts/set-env.sh` / `.\stack.ps1 env` | Prompt for session-scoped application credentials | [readme.md](readme.md#L165-L217), [stack.ps1](stack.ps1#L438-L450) |
 | `./stack.sh init-vpn` / `.\stack.ps1 init-vpn` | Create ignored, newline-free VPN secret files with restrictive permissions | [stack.sh](stack.sh#L51-L94), [stack.ps1](stack.ps1#L66-L147) |
@@ -71,8 +81,7 @@ are loaded by sourcing `scripts/set-env.sh`.
 | `./stack.sh doctor` / `.\stack.ps1 doctor` | Check target selection, secrets, Compose rendering, containers, paths, hardlinks, tunnel state, and endpoints | [stack.sh](stack.sh#L218-L273), [stack.ps1](stack.ps1#L211-L280) |
 | `./stack.sh verify` / `.\stack.ps1 verify` | Check tunnel health, inspect-time VPN credential exposure, and distinct host/VPN public IPs | [stack.sh](stack.sh#L400-L438), [stack.ps1](stack.ps1#L523-L558) |
 | `./stack.sh backup` / `.\stack.ps1 backup` | Stop services, archive sensitive deployment state, then restart | [stack.sh](stack.sh#L439-L447), [stack.ps1](stack.ps1#L513-L521) |
-| Unit/single-test command | None exists. This repository has operational smoke checks rather than a unit-test framework. | [INFERRED] Current tracked scripts and documented command list at [readme.md](readme.md#L477-L499) |
-| Lint / format / typecheck | No canonical command is defined. PowerShell files did pass parser validation while this document was written. | [INFERRED] No manifest/task-runner command; wrapper usage is enumerated at [stack.ps1](stack.ps1#L17-L29) |
+| Shell and Compose checks | `bash -n scripts/migrate-deployment.sh`, PowerShell parser validation, and target-specific `docker compose ... config --quiet` | Migration helper and both Compose targets passed these checks during CLI implementation. |
 | CI workflow | No workflow is present in this checkout. A historical summary describes one on a separate `ci/compose-validation` branch, not in the current branch. | [Resolved contradiction] [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md#L128-L169) |
 | CI enforcement | **[UNVERIFIED]** No current CI workflow exists, and required-check/branch-protection settings are remote platform configuration. | Manual confirmation in repository settings is required. |
 
@@ -80,6 +89,10 @@ are loaded by sourcing `scripts/set-env.sh`.
 
 | Path | Purpose |
 |---|---|
+| `cmd/media-stack/` | Compiled CLI entry point, command routing, approvals, and user-facing output. |
+| `internal/config/`, `internal/discovery/`, `internal/planner/` | Strict desired state, host/installation facts, deterministic operations, and stale-plan checks. |
+| `internal/workflow/`, `internal/scripts/`, `internal/status/` | Resumable journals, wrapper adapters, redaction boundaries, and bounded diagnostics. |
+| `go.mod`, `go.sum` | Go language version and reproducible CLI dependency definition. |
 | `docker-compose.yml` | Platform-neutral service graph, bridge network, ports, volumes, and shared runtime defaults. |
 | `compose/` | Linux/Windows target differences, Docker secrets, and optional Intel/NVIDIA GPU reservations. |
 | `env/` | Copyable non-secret deployment templates that select overlays and platform defaults. |
@@ -233,7 +246,7 @@ the primary compatibility risk.
 ```mermaid
 flowchart LR
     User[Household user] -->|requests| Stack[Media Stack]
-    Operator[Operator] -->|stack.sh / stack.ps1| Stack
+    Operator[Operator] -->|media-stack CLI or stack wrappers| Stack
     Stack -->|search| Indexers[NZB and torrent indexers]
     Stack -->|download| Usenet[Usenet provider]
     Stack -->|torrent traffic through VPN| Swarm[Torrent swarm]
@@ -292,20 +305,25 @@ sequenceDiagram
 
 ### Layering and dependency rules
 
-1. **Operator façade → orchestration:** wrappers validate host/runtime state and
+1. **Desired state → reviewed plan → wrapper adapter:** the Go CLI validates
+   strict YAML, hashes desired and discovered state, and rejects stale plans
+   before delegating mutations ([internal/config/config.go](internal/config/config.go#L107-L171),
+   [internal/planner/planner.go](internal/planner/planner.go#L52-L106),
+   [internal/planner/planner.go](internal/planner/planner.go#L194-L214)).
+2. **Operator façade → orchestration:** wrappers validate host/runtime state and
    delegate to Compose or scripts; callers should not reproduce their checks
    ad hoc ([stack.sh](stack.sh#L274-L452)).
-2. **Compose → upstream services:** the base model owns platform-neutral
+3. **Compose → upstream services:** the base model owns platform-neutral
    topology; overlays may add target-specific resources but should not duplicate
    whole service definitions ([readme.md](readme.md#L81-L125)).
-3. **Bootstrap → generated application state:** scripts may read and mutate
+4. **Bootstrap → generated application state:** scripts may read and mutate
    ignored `config/`, but versioned files must not contain generated API keys or
    sessions ([.gitignore](.gitignore#L1-L16)).
-4. **Applications → shared paths:** downloaders and arr applications use the
+5. **Applications → shared paths:** downloaders and arr applications use the
    same `/data` namespace; consumers receive read-only media mounts where
    possible ([docker-compose.yml](docker-compose.yml#L58-L60),
    [docker-compose.yml](docker-compose.yml#L157-L159)).
-5. **qBittorrent → Gluetun network namespace:** qBittorrent must not gain an
+6. **qBittorrent → Gluetun network namespace:** qBittorrent must not gain an
    independent network attachment; this is the structural VPN kill switch
    ([readme.md](readme.md#L73-L77),
    [docker-compose.yml](docker-compose.yml#L44-L50)).
