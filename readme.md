@@ -17,6 +17,7 @@ One base Compose file holds everything platform-neutral. Thin overlays add targe
 - [Architecture](#architecture)
 - [How the dual-target setup works](#how-the-dual-target-setup-works)
 - [Anime baseline](#anime-baseline)
+- [Private HTTPS proxy](#private-https-proxy)
 - [Repository layout](#repository-layout)
 - [Prerequisites](#prerequisites)
 - [Secrets](#secrets)
@@ -49,6 +50,7 @@ One base Compose file holds everything platform-neutral. Thin overlays add targe
 | ErsatzTV | 8409 | Pseudo-live TV channels and guide data from the local library. |
 | Seerr | 5055 | Request UI for the household. |
 | Tailscale | — | Remote access. Linux host node or optional Windows container node. |
+| Caddy | 80/443 | Optional hostname-based HTTPS ingress using a private CA by default. |
 
 Seerr is the merged successor to Overseerr and Jellyseerr. Readarr is deliberately absent — the project was archived in 2025.
 
@@ -84,15 +86,17 @@ Two network domains live on one host and never talk over the network the way you
 Docker Compose reads the `COMPOSE_FILE` variable from `.env`. Set it there and plain `docker compose up -d` picks up the right overlays with no flags:
 
 ```
-COMPOSE_FILE=docker-compose.yml:compose/linux.yml:compose/secrets.yml
+COMPOSE_FILE=docker-compose.yml:compose/linux.yml:compose/secrets.yml:compose/proxy.yml
 COMPOSE_PROJECT_NAME=media
+COMPOSE_PROFILES=proxy
 ```
 
 On Windows, use `;` as the path separator instead:
 
 ```
-COMPOSE_FILE=docker-compose.yml;compose/windows.yml;compose/secrets.yml
+COMPOSE_FILE=docker-compose.yml;compose/windows.yml;compose/secrets.yml;compose/proxy.yml
 COMPOSE_PROJECT_NAME=media-dev
+COMPOSE_PROFILES=tailscale,proxy
 ```
 
 Switching targets means swapping `.env`. That is all `stack.sh use` and `stack.ps1 use` do — copy the selected template over `.env`. You can do it by hand and nothing breaks.
@@ -143,6 +147,25 @@ See [the anime baseline guide](docs/ANIME_BASELINE.md) for validated corrections
 existing-series migration, Bazarr's intentionally manual profile configuration,
 chapter-segment automation, and Direct Play verification.
 
+## Private HTTPS proxy
+
+The default environment templates enable an optional Caddy overlay that routes
+stable hostnames such as `https://sonarr.media.home.arpa` to services on the
+private `medianet` bridge. It issues private certificates initially and includes
+an ACME policy scaffold for a later CA migration.
+
+```bash
+./stack.sh up
+./stack.sh proxy-check
+./stack.sh proxy-ca
+```
+
+Create local DNS records before using the hostnames, then trust the exported
+`config/caddy/pki/root.crt` on each client. Existing direct HTTP ports remain
+available during migration. See [the reverse proxy guide](docs/REVERSE_PROXY.md)
+for DNS, certificate trust, CA migration, validation, and the remaining
+hardening decisions.
+
 ## Repository layout
 
 ```
@@ -152,7 +175,9 @@ chapter-segment automation, and Direct Play verification.
 ├── compose/                    # target, secret, and optional GPU overlays
 │   ├── linux.yml / windows.yml
 │   ├── secrets.yml
+│   ├── proxy.yml
 │   └── gpu-intel.yml / gpu-nvidia.yml
+├── proxy/                     # Caddy routes and swappable TLS issuer policy
 ├── env/                        # copyable non-secret target templates
 │   ├── linux.env.example
 │   └── windows.env.example
@@ -504,6 +529,8 @@ source ./scripts/set-env.sh   # prompt for session env vars
 ./stack.sh setup-data         # create /data/usenet, /data/torrents, and media folders
 ./stack.sh bootstrap          # configure authentication, apps, clients, Moonbase, Jellyfin, and Seerr
 ./stack.sh audit-anime        # verify Sonarr and Seerr anime routing
+./stack.sh proxy-check        # verify private TLS and every proxy upstream
+./stack.sh proxy-ca           # export the private root CA for client trust
 ./stack.sh import-indexers    # import local indexers.json into Prowlarr
 ./stack.sh sync-profiles      # sync TRaSH quality profiles and custom formats
 ./stack.sh doctor             # check Docker, data paths, hardlinks, APIs, and Gluetun
@@ -590,12 +617,14 @@ Application-level settings — quality profiles, indexers, naming schemes — ar
 
 ## Security model
 
-Three paths cross the network edge. Two are outbound-initiated; one is refused.
+The optional Caddy proxy adds a LAN ingress path on ports 80 and 443. Remote
+Internet ingress remains refused.
 
 ```
 qBittorrent ──► Gluetun ──► VPN exit ──► swarm        (sees the VPN's IP)
 your phone  ──► Tailscale mesh ◄── server              (both ends dial out)
 internet    ──► router ──╫──  server                   (0 ports forwarded)
+LAN client  ──► Caddy:443 ──► medianet services        (private HTTPS)
 ```
 
 **This repository does not configure router port forwarding.** Linux binds service ports to `0.0.0.0` for LAN access, while Windows development binds to `127.0.0.1`; whether a Linux service is publicly reachable still depends on the host firewall, router, and deployment environment. Bootstrap enables application authentication rather than relying on network placement alone.

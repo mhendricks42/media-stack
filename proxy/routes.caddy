@@ -1,0 +1,58 @@
+(service_defaults) {
+	encode zstd gzip
+	header -Server
+}
+
+qbittorrent.{$PROXY_DOMAIN:media.home.arpa} {
+	import service_defaults
+	import tls_policy
+	reverse_proxy gluetun:8080
+}
+
+sabnzbd.{$PROXY_DOMAIN:media.home.arpa} {
+	import service_defaults
+	import tls_policy
+	reverse_proxy sabnzbd:8080
+}
+
+prowlarr.{$PROXY_DOMAIN:media.home.arpa} {
+	import service_defaults
+	import tls_policy
+	reverse_proxy prowlarr:9696
+}
+
+sonarr.{$PROXY_DOMAIN:media.home.arpa} {
+	import service_defaults
+	import tls_policy
+	reverse_proxy sonarr:8989
+}
+
+radarr.{$PROXY_DOMAIN:media.home.arpa} {
+	import service_defaults
+	import tls_policy
+	reverse_proxy radarr:7878
+}
+
+bazarr.{$PROXY_DOMAIN:media.home.arpa} {
+	import service_defaults
+	import tls_policy
+	reverse_proxy bazarr:6767
+}
+
+jellyfin.{$PROXY_DOMAIN:media.home.arpa} {
+	import service_defaults
+	import tls_policy
+	reverse_proxy jellyfin:8096
+}
+
+ersatztv.{$PROXY_DOMAIN:media.home.arpa} {
+	import service_defaults
+	import tls_policy
+	reverse_proxy ersatztv:8409
+}
+
+seerr.{$PROXY_DOMAIN:media.home.arpa} {
+	import service_defaults
+	import tls_policy
+	reverse_proxy seerr:5055
+}

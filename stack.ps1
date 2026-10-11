@@ -22,6 +22,8 @@ function Show-Usage {
     Write-Host "  .\stack.ps1 up|down|ps|pull|config"
     Write-Host "  .\stack.ps1 setup-data"
     Write-Host "  .\stack.ps1 audit-anime"
+    Write-Host "  .\stack.ps1 proxy-ca [output-path]"
+    Write-Host "  .\stack.ps1 proxy-check"
     Write-Host "  .\stack.ps1 env [--include-tailscale]"
     Write-Host "  .\stack.ps1 bootstrap"
     Write-Host "  .\stack.ps1 import-indexers [path] [--dry-run]"
@@ -172,6 +174,70 @@ function Invoke-Recyclarr {
     if (-not (Test-Path $configFile)) {
         if (-not (Test-Path 'recyclarr.example.yml')) {
             throw 'Missing recyclarr.example.yml and config\recyclarr\recyclarr.yml. Restore one of them, then run sync-profiles again.'
+        }
+
+        function Export-ProxyCa {
+            param([string]$OutputPath = 'config\caddy\pki\root.crt')
+
+            Test-DockerEngine
+            $containerId = (docker compose ps -q caddy).Trim()
+            if (-not $containerId) {
+                throw 'Caddy is not running. Enable the proxy profile and run .\stack.ps1 up first.'
+            }
+
+            $parent = Split-Path -Parent $OutputPath
+            if ($parent) {
+                New-Item -ItemType Directory -Force -Path $parent | Out-Null
+            }
+            docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt $OutputPath
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Caddy root certificate export failed.'
+            }
+            Write-Host "Caddy private root certificate exported to $OutputPath"
+            Write-Host 'Install it only in trusted client root stores. Do not export the CA private key.'
+        }
+
+        function Test-Proxy {
+            Test-DockerEngine
+            $containerId = (docker compose ps -q caddy).Trim()
+            if (-not $containerId) {
+                throw 'Caddy is not running. Enable the proxy profile and run .\stack.ps1 up first.'
+            }
+
+            $health = (docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' $containerId).Trim()
+            if ($health -ne 'healthy') {
+                docker compose logs --tail=80 caddy
+                throw "Caddy is $health."
+            }
+            Write-Host 'PASS: Caddy container is healthy.'
+
+            $domain = Get-EnvFileValue 'PROXY_DOMAIN'
+            if (-not $domain) { $domain = 'media.home.arpa' }
+            $caFile = Join-Path ([IO.Path]::GetTempPath()) "media-stack-caddy-$([guid]::NewGuid().ToString('N')).crt"
+            try {
+                docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt $caFile *> $null
+                $tlsArguments = if ($LASTEXITCODE -eq 0) { @('--cacert', $caFile) } else { @() }
+
+                $failed = $false
+                foreach ($hostName in @('qbittorrent', 'sabnzbd', 'prowlarr', 'sonarr', 'radarr', 'bazarr', 'jellyfin', 'ersatztv', 'seerr')) {
+                    $fqdn = "$hostName.$domain"
+                    $status = & curl.exe -sS --max-time 15 @tlsArguments --resolve "${fqdn}:443:127.0.0.1" -o NUL -w '%{http_code}' "https://$fqdn/"
+                    if ($LASTEXITCODE -eq 0 -and $status -match '^[1-4][0-9][0-9]$') {
+                        Write-Host "PASS: $fqdn -> HTTP $status"
+                    }
+                    else {
+                        $displayStatus = if ($status) { $status } else { 'connection error' }
+                        Write-Host "FAIL: $fqdn -> HTTP $displayStatus"
+                        $failed = $true
+                    }
+                }
+                if ($failed) {
+                    throw 'One or more proxy routes failed. Inspect with .\stack.ps1 logs caddy.'
+                }
+            }
+            finally {
+                Remove-Item $caFile -Force -ErrorAction SilentlyContinue
+            }
         }
         Copy-Item 'recyclarr.example.yml' $configFile
         Write-Host "Created $configFile from recyclarr.example.yml. Edit it to change which TRaSH templates are applied."
@@ -445,6 +511,12 @@ ls -la /data/media
             throw "Anime audit failed with exit code $LASTEXITCODE."
         }
     }
+    'proxy-ca' {
+        if ($Arg) { Export-ProxyCa -OutputPath $Arg } else { Export-ProxyCa }
+    }
+    'proxy-check' {
+        Test-Proxy
+    }
     'env' {
         if ($Arg -eq '--include-tailscale') {
             & .\scripts\set-env.ps1 -IncludeTailscale
@@ -525,7 +597,7 @@ ls -la /data/media
         $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         New-Item -ItemType Directory -Force -Path 'backups' | Out-Null
         docker compose stop
-        tar -czf "backups/media-stack-$timestamp.tgz" config .env docker-compose.yml compose env indexers.example.json recyclarr.example.yml scripts stack.ps1 stack.sh readme.md
+        tar -czf "backups/media-stack-$timestamp.tgz" config .env docker-compose.yml compose proxy env indexers.example.json recyclarr.example.yml scripts stack.ps1 stack.sh readme.md
         docker compose up -d
         Write-Host "Backup written to backups/media-stack-$timestamp.tgz"
         Write-Host 'Treat this archive as sensitive: config/ can contain API keys and session tokens.'

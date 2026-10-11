@@ -1,0 +1,9 @@
+# Use only with a domain the selected ACME CA is authorized to issue.
+# Set PROXY_TLS_POLICY=./proxy/tls/acme.caddy.example, ACME_EMAIL, and
+# ACME_CA_DIRECTORY in .env. The stock Caddy image supports HTTP-01 and
+# TLS-ALPN-01. DNS-01 requires a Caddy build containing your DNS provider module.
+(tls_policy) {
+	tls {$ACME_EMAIL} {
+		ca {$ACME_CA_DIRECTORY}
+	}
+}

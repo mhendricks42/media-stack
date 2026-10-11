@@ -10,6 +10,8 @@ Usage:
   ./stack.sh up|down|ps|pull|config
   ./stack.sh setup-data
   ./stack.sh audit-anime
+  ./stack.sh proxy-ca [output-path]
+  ./stack.sh proxy-check
   source ./scripts/set-env.sh [--include-tailscale]
   ./stack.sh bootstrap
   ./stack.sh import-indexers [path] [--dry-run]
@@ -212,6 +214,75 @@ run_recyclarr() {
   fi
 }
 
+export_proxy_ca() {
+  local output_path="${1:-config/caddy/pki/root.crt}"
+  local container_id
+
+  check_docker_engine
+  container_id="$(docker compose ps -q caddy)"
+  if [[ -z "$container_id" ]]; then
+    echo "Caddy is not running. Enable the proxy profile and run ./stack.sh up first." >&2
+    exit 1
+  fi
+
+  mkdir -p "$(dirname "$output_path")"
+  docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$output_path"
+  chmod 0644 "$output_path"
+  echo "Caddy private root certificate exported to $output_path"
+  echo "Install it only in trusted client root stores. Do not export the CA private key."
+}
+
+check_proxy() {
+  local container_id health domain ca_file host status
+  local -a tls_args=()
+  local failed=0
+
+  check_docker_engine
+  container_id="$(docker compose ps -q caddy)"
+  if [[ -z "$container_id" ]]; then
+    echo "Caddy is not running. Enable the proxy profile and run ./stack.sh up first." >&2
+    exit 1
+  fi
+
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id")"
+  if [[ "$health" != healthy ]]; then
+    docker compose logs --tail=80 caddy
+    echo "Caddy is $health." >&2
+    exit 1
+  fi
+  echo "PASS: Caddy container is healthy."
+
+  domain="$(get_env_file_value PROXY_DOMAIN)"
+  domain="${domain:-media.home.arpa}"
+  ca_file="$(mktemp)"
+  trap 'rm -f "$ca_file"' RETURN
+  if docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$ca_file" >/dev/null 2>&1; then
+    tls_args=(--cacert "$ca_file")
+  else
+    rm -f "$ca_file"
+    tls_args=()
+  fi
+
+  for host in qbittorrent sabnzbd prowlarr sonarr radarr bazarr jellyfin ersatztv seerr; do
+    status="$(curl -sS --max-time 15 "${tls_args[@]}" \
+      --resolve "$host.$domain:443:127.0.0.1" \
+      -o /dev/null -w '%{http_code}' "https://$host.$domain/" || true)"
+    if [[ "$status" =~ ^[1-4][0-9][0-9]$ ]]; then
+      echo "PASS: $host.$domain -> HTTP $status"
+    else
+      echo "FAIL: $host.$domain -> HTTP ${status:-connection error}"
+      failed=1
+    fi
+  done
+
+  rm -f "$ca_file"
+  trap - RETURN
+  if ((failed)); then
+    echo "One or more proxy routes failed. Inspect with ./stack.sh logs caddy." >&2
+    exit 1
+  fi
+}
+
 public_ip() {
   curl -fsSL --max-time 10 https://ipinfo.io/ip 2>/dev/null || curl -fsSL --max-time 10 https://api.ipify.org
 }
@@ -347,6 +418,12 @@ case "$cmd" in
     check_docker_engine
     bash ./scripts/audit-anime.sh
     ;;
+  proxy-ca)
+    export_proxy_ca "$arg"
+    ;;
+  proxy-check)
+    check_proxy
+    ;;
   bootstrap)
     check_docker_engine
     bash ./scripts/bootstrap.sh
@@ -447,7 +524,7 @@ case "$cmd" in
     ts="$(date +%Y%m%d-%H%M%S)"
     mkdir -p backups
     docker compose stop
-    tar -czf "backups/media-stack-$ts.tgz" config .env docker-compose.yml compose env recyclarr.example.yml
+    tar -czf "backups/media-stack-$ts.tgz" config .env docker-compose.yml compose proxy env recyclarr.example.yml
     docker compose up -d
     echo "Backup written to backups/media-stack-$ts.tgz"
     echo "Treat this archive as sensitive: config/ can contain API keys and session tokens."

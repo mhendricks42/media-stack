@@ -1,0 +1,42 @@
+volumes:
+  caddy_data:
+  caddy_config:
+
+services:
+  caddy:
+    image: caddy:2.11.7-alpine
+    profiles:
+      - proxy
+    networks:
+      - medianet
+    ports:
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:80:80
+      - ${BIND_ADDR:?Set BIND_ADDR in .env}:443:443
+    environment:
+      PROXY_DOMAIN: ${PROXY_DOMAIN:-media.home.arpa}
+      ACME_CA_DIRECTORY: ${ACME_CA_DIRECTORY:-https://acme-v02.api.letsencrypt.org/directory}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./proxy/routes.caddy:/etc/caddy/routes.caddy:ro
+      - ${PROXY_TLS_POLICY:-./proxy/tls/internal.caddy}:/etc/caddy/tls-policy.caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2019/config/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      autoheal: "true"
+    restart: ${RESTART_POLICY:?Set RESTART_POLICY in .env}

@@ -32,6 +32,7 @@ bootstrap wiring, operational checks, and cross-platform wrappers.
 | Persistent state | Bind-mounted application configuration, mostly SQLite/XML/INI/JSON owned by upstream services | [docker-compose.yml](docker-compose.yml#L58-L60), [readme.md](readme.md#L148-L155) |
 | Shared media storage | One `/data` tree for Usenet, torrents, and media to preserve hardlinks | [readme.md](readme.md#L73-L79), [readme.md](readme.md#L536-L548) |
 | Private networking | `medianet` bridge for application traffic; qBittorrent shares Gluetun's network namespace | [docker-compose.yml](docker-compose.yml#L10-L13), [docker-compose.yml](docker-compose.yml#L45-L50) |
+| Browser ingress | Optional Caddy reverse proxy on 80/443 with private PKI by default and swappable ACME policy | [compose/proxy.yml](compose/proxy.yml), [proxy/routes.caddy](proxy/routes.caddy), [docs/REVERSE_PROXY.md](docs/REVERSE_PROXY.md) |
 | Remote access | Host-network Tailscale on Linux; optional userspace container on Windows | [compose/linux.yml](compose/linux.yml#L1-L19), [compose/windows.yml](compose/windows.yml#L1-L19) |
 
 ### Entry points
@@ -82,7 +83,8 @@ are loaded by sourcing `scripts/set-env.sh`.
 | Path | Purpose |
 |---|---|
 | `docker-compose.yml` | Platform-neutral service graph, bridge network, ports, volumes, and shared runtime defaults. |
-| `compose/` | Linux/Windows target differences, Docker secrets, and optional Intel/NVIDIA GPU reservations. |
+| `compose/` | Linux/Windows target differences, Docker secrets, Caddy ingress, and optional Intel/NVIDIA GPU reservations. |
+| `proxy/` | Caddy service routes plus private-PKI and ACME issuer policies. |
 | `env/` | Copyable non-secret deployment templates that select overlays and platform defaults. |
 | `scripts/` | Bootstrap, authentication, anime auditing, indexer import, environment prompting, and Windows storage preparation. |
 | `docs/` | Operational guides, including the validated anime baseline, plus migration, image, and history notes. |
