@@ -6,6 +6,8 @@ param(
     [string]$MoviesLibraryPath = '/data/media/movies',
     [string]$ShowsLibraryName = 'Shows',
     [string]$ShowsLibraryPath = '/data/media/tv',
+    [string]$AnimeLibraryName = 'Anime',
+    [string]$AnimeLibraryPath = '/data/media/anime',
     [string]$LiveTvTunerUrl = 'http://ersatztv:8409/iptv/channels.m3u',
     [string]$LiveTvGuideUrl = 'http://ersatztv:8409/iptv/xmltv.xml',
     [switch]$MoonbaseReprovisionOnly
@@ -255,7 +257,8 @@ function Ensure-JellyfinServerName {
 function New-JellyfinLibraryOptions {
     param(
         [string]$CollectionType,
-        [string]$Path
+        [string]$Path,
+        [switch]$DisableBackdrops
     )
 
     $typeOptions = if ($CollectionType -eq 'movies') {
@@ -266,7 +269,7 @@ function New-JellyfinLibraryOptions {
                 MetadataFetcherOrder = @('TheMovieDb', 'The Open Movie Database')
                 ImageFetchers = @('TheMovieDb', 'The Open Movie Database', 'Embedded Image Extractor', 'Screen Grabber')
                 ImageFetcherOrder = @('TheMovieDb', 'The Open Movie Database', 'Embedded Image Extractor', 'Screen Grabber')
-                ImageOptions = @()
+                ImageOptions = $(if ($DisableBackdrops) { @(@{ Type = 'Backdrop'; Limit = 0; MinWidth = 0 }) } else { @() })
                 SimilarItemProviders = @('Local Genre/Tag')
                 SimilarItemProviderOrder = @('TheMovieDb', 'Local Genre/Tag')
             }
@@ -354,7 +357,9 @@ function Ensure-JellyfinLibrary {
         [hashtable]$Headers,
         [string]$Name,
         [string]$CollectionType,
-        [string]$Path
+        [string]$Path,
+        [switch]$ReconcileOptions,
+        [switch]$DisableBackdrops
     )
 
     $libraries = @(Invoke-JsonRequest -Method GET -Uri 'http://localhost:8096/Library/VirtualFolders' -Headers $Headers)
@@ -362,6 +367,16 @@ function Ensure-JellyfinLibrary {
     if ($existing.Count -gt 0) {
         $locations = @($existing[0].Locations)
         if ($locations -contains $Path) {
+            if ($ReconcileOptions) {
+                $options = New-JellyfinLibraryOptions -CollectionType $CollectionType -Path $Path -DisableBackdrops:$DisableBackdrops
+                $libraryId = if ($existing[0].PSObject.Properties['ItemId']) { $existing[0].ItemId } else { $existing[0].Id }
+                if (-not $libraryId) {
+                    throw "Jellyfin did not expose the $Name library ID."
+                }
+                Invoke-JsonRequest -Method POST -Uri 'http://localhost:8096/Library/VirtualFolders/LibraryOptions' `
+                    -Headers $Headers -Body @{ Id = $libraryId; LibraryOptions = $options } | Out-Null
+                Write-Host "Jellyfin library options reconciled: $Name"
+            }
             Write-Host "Jellyfin library verified: $Name -> $Path"
             return
         }
@@ -370,14 +385,41 @@ function Ensure-JellyfinLibrary {
             -Headers $Headers `
             -Body @{ Name = $Name; Path = $Path } | Out-Null
         Write-Host "Jellyfin library path added: $Name -> $Path"
+        if ($ReconcileOptions) {
+            $options = New-JellyfinLibraryOptions -CollectionType $CollectionType -Path $Path -DisableBackdrops:$DisableBackdrops
+            $libraryId = if ($existing[0].PSObject.Properties['ItemId']) { $existing[0].ItemId } else { $existing[0].Id }
+            Invoke-JsonRequest -Method POST -Uri 'http://localhost:8096/Library/VirtualFolders/LibraryOptions' `
+                -Headers $Headers -Body @{ Id = $libraryId; LibraryOptions = $options } | Out-Null
+            Write-Host "Jellyfin library options reconciled: $Name"
+        }
         return
     }
 
-    $options = New-JellyfinLibraryOptions -CollectionType $CollectionType -Path $Path
+    $options = New-JellyfinLibraryOptions -CollectionType $CollectionType -Path $Path -DisableBackdrops:$DisableBackdrops
     Invoke-JsonRequest -Method POST -Uri "http://localhost:8096/Library/VirtualFolders?name=$([uri]::EscapeDataString($Name))&collectionType=$([uri]::EscapeDataString($CollectionType))&refreshLibrary=false" `
         -Headers $Headers `
         -Body $options | Out-Null
     Write-Host "Jellyfin library created: $Name -> $Path"
+}
+
+function Ensure-JellyfinSubtitlePreferences {
+    param(
+        [hashtable]$Headers,
+        [string]$UserId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($UserId)) {
+        throw 'Jellyfin authentication response did not include the administrator user ID.'
+    }
+    $user = Invoke-JsonRequest -Method GET -Uri "http://localhost:8096/Users/$UserId" -Headers $Headers
+    $configuration = $user.Configuration
+    if ($null -eq $configuration) {
+        throw "Jellyfin did not return configuration for user $UserId."
+    }
+    Set-JsonPropertyValue -Object $configuration -Name 'SubtitleLanguagePreference' -Value 'eng' | Out-Null
+    Set-JsonPropertyValue -Object $configuration -Name 'SubtitleMode' -Value 'Always' | Out-Null
+    Invoke-JsonRequest -Method POST -Uri "http://localhost:8096/Users/Configuration?userId=$UserId" -Headers $Headers -Body $configuration | Out-Null
+    Write-Host 'Jellyfin administrator subtitle preferences configured: English, Always.'
 }
 
 function Ensure-XmlElementValue {
@@ -569,6 +611,8 @@ if ($MoonbaseReprovisionOnly) {
 Ensure-JellyfinServerName -Headers $headers
 Ensure-JellyfinLibrary -Headers $headers -Name $MoviesLibraryName -CollectionType 'movies' -Path $MoviesLibraryPath
 Ensure-JellyfinLibrary -Headers $headers -Name $ShowsLibraryName -CollectionType 'tvshows' -Path $ShowsLibraryPath
+Ensure-JellyfinLibrary -Headers $headers -Name $AnimeLibraryName -CollectionType 'tvshows' -Path $AnimeLibraryPath -ReconcileOptions -DisableBackdrops
+Ensure-JellyfinSubtitlePreferences -Headers $headers -UserId $session.User.Id
 $liveTvChanged = Ensure-JellyfinLiveTvConfig
 $moonbaseChanged = $false
 if ($moonbaseEnabled) {

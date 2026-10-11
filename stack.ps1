@@ -21,6 +21,7 @@ function Show-Usage {
     Write-Host "  .\stack.ps1 init-windows [distro] [linux-user]"
     Write-Host "  .\stack.ps1 up|down|ps|pull|config"
     Write-Host "  .\stack.ps1 setup-data"
+    Write-Host "  .\stack.ps1 audit-anime"
     Write-Host "  .\stack.ps1 env [--include-tailscale]"
     Write-Host "  .\stack.ps1 bootstrap"
     Write-Host "  .\stack.ps1 import-indexers [path] [--dry-run]"
@@ -252,7 +253,7 @@ function Invoke-Doctor {
 
         $sonarrContainerId = (docker compose ps -q sonarr).Trim()
         if ($sonarrContainerId) {
-            docker compose exec -T sonarr sh -lc "test -d /data/usenet/incomplete -a -d /data/usenet/complete/tv -a -d /data/usenet/complete/movies -a -d /data/torrents -a -d /data/media/tv -a -d /data/media/movies" *> $null
+            docker compose exec -T sonarr sh -lc "test -d /data/usenet/incomplete -a -d /data/usenet/complete/tv -a -d /data/usenet/complete/movies -a -d /data/torrents -a -d /data/media/tv -a -d /data/media/movies -a -d /data/media/anime -a -d /data/media/anime-movies" *> $null
             Write-Check 'data folders exist' ($LASTEXITCODE -eq 0)
 
             docker compose exec -T sonarr sh -lc 'rm -f /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; echo test > /data/usenet/complete/tv/doctor-hardlink.txt; ln /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; count=$(stat -c ''%h'' /data/usenet/complete/tv/doctor-hardlink.txt); rm -f /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; test "$count" = 2' *> $null
@@ -415,7 +416,9 @@ for path in \
   /data/torrents/incomplete \
   /data/media \
   /data/media/tv \
-  /data/media/movies
+  /data/media/movies \
+  /data/media/anime \
+  /data/media/anime-movies
 do
   if [ -d "$path" ]; then
     echo "Keeping existing directory: $path"
@@ -433,6 +436,13 @@ ls -la /data/media
         docker compose exec -T sonarr sh -lc $setupDataScript
         if ($LASTEXITCODE -ne 0) {
             throw "Data directory setup failed with exit code $LASTEXITCODE."
+        }
+    }
+    'audit-anime' {
+        Test-DockerEngine
+        & .\scripts\audit-anime.ps1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Anime audit failed with exit code $LASTEXITCODE."
         }
     }
     'env' {

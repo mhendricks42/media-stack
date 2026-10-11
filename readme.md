@@ -16,6 +16,7 @@ One base Compose file holds everything platform-neutral. Thin overlays add targe
 - [What this runs](#what-this-runs)
 - [Architecture](#architecture)
 - [How the dual-target setup works](#how-the-dual-target-setup-works)
+- [Anime baseline](#anime-baseline)
 - [Repository layout](#repository-layout)
 - [Prerequisites](#prerequisites)
 - [Secrets](#secrets)
@@ -123,6 +124,24 @@ On Windows, the equivalent separator is `;`:
 ```powershell
 $env:COMPOSE_FILE='docker-compose.yml;compose/windows.yml;compose/secrets.yml;compose/gpu-nvidia.yml'
 ```
+
+## Anime baseline
+
+The default bootstrap includes dedicated `/data/media/anime` storage, Sonarr
+absolute-number naming and root-based `seriesType` reconciliation, the current
+Recyclarr v8 anime profile, Seerr's anime root/profile override, and a Jellyfin
+Anime library with backdrop generation disabled.
+
+```bash
+./stack.sh setup-data
+source ./scripts/set-env.sh --include-tailscale
+./stack.sh bootstrap
+./stack.sh audit-anime
+```
+
+See [the anime baseline guide](docs/ANIME_BASELINE.md) for validated corrections,
+existing-series migration, Bazarr's intentionally manual profile configuration,
+chapter-segment automation, and Direct Play verification.
 
 ## Repository layout
 
@@ -258,6 +277,7 @@ mkdir -p config/seerr && sudo chown -R 1000:1000 config/seerr
 ./stack.sh up
 ./stack.sh setup-data
 ./stack.sh bootstrap
+./stack.sh audit-anime
 ./stack.sh doctor
 ./stack.sh verify
 ```
@@ -337,6 +357,7 @@ notepad .env          # confirm non-secret values such as VPN_COUNTRY and LAN_SU
 .\stack.ps1 up
 .\stack.ps1 setup-data
 .\stack.ps1 bootstrap
+.\stack.ps1 audit-anime
 .\stack.ps1 doctor
 .\stack.ps1 verify
 ```
@@ -431,7 +452,7 @@ For private indexer credentials, put environment references in `indexers.json` i
 ./stack.sh sync-profiles
 ```
 
-The first run copies `recyclarr.example.yml` to `config/recyclarr/recyclarr.yml`, then applies it. The shipped file syncs a 1080p WEB profile plus the full anime set — every Anime BD and Web tier, Anime Raws, Anime LQ Groups, and Uncensored — with TRaSH's intended scores. Edit `config/recyclarr/recyclarr.yml` to change which templates apply, then re-run.
+The first run copies `recyclarr.example.yml` to `config/recyclarr/recyclarr.yml`, then applies it. Bootstrap also synchronizes this validated v8 baseline before configuring Seerr. The shipped file syncs a 1080p WEB profile and `[Anime] Remux-1080p` with TRaSH's required custom formats and scores. Edit `config/recyclarr/recyclarr.yml` to add optional v8 `custom_format_groups`, then re-run. Do not use obsolete `include: template:` examples from older Recyclarr releases.
 
 The wrappers read the Sonarr and Radarr API keys out of `config/` and inject them as environment variables, so no key is ever written into the Recyclarr config.
 
@@ -482,6 +503,7 @@ If usage jumped by the file size, hardlinks are not working. Fix that before add
 source ./scripts/set-env.sh   # prompt for session env vars
 ./stack.sh setup-data         # create /data/usenet, /data/torrents, and media folders
 ./stack.sh bootstrap          # configure authentication, apps, clients, Moonbase, Jellyfin, and Seerr
+./stack.sh audit-anime        # verify Sonarr and Seerr anime routing
 ./stack.sh import-indexers    # import local indexers.json into Prowlarr
 ./stack.sh sync-profiles      # sync TRaSH quality profiles and custom formats
 ./stack.sh doctor             # check Docker, data paths, hardlinks, APIs, and Gluetun

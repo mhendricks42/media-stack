@@ -89,6 +89,19 @@ function Find-ProfileId {
     return $Profiles[0].id
 }
 
+function Get-RequiredProfileId {
+    param(
+        [object[]]$Profiles,
+        [string]$Name
+    )
+
+    $found = $Profiles | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+    if (-not $found) {
+        throw "Required quality profile '$Name' was not found. Run sync-profiles and retry."
+    }
+    return $found.id
+}
+
 function Set-JsonProperty {
     param(
         [object]$Object,
@@ -145,7 +158,9 @@ function Update-SeerrSettings {
         [string]$Service,
         [int]$ProfileId,
         [string]$ProfileName,
-        [string]$ApiKey
+        [string]$ApiKey,
+        [int]$AnimeProfileId = 0,
+        [string]$AnimeProfileName = ''
     )
 
     if (-not (Test-Path $SettingsPath)) {
@@ -167,9 +182,9 @@ function Update-SeerrSettings {
         Set-JsonProperty -Object $instance -Name 'activeProfileId' -Value $ProfileId
         Set-JsonProperty -Object $instance -Name 'activeProfileName' -Value $ProfileName
         Set-JsonProperty -Object $instance -Name 'activeDirectory' -Value '/data/media/tv'
-        Set-JsonProperty -Object $instance -Name 'activeAnimeProfileId' -Value $ProfileId
-        Set-JsonProperty -Object $instance -Name 'activeAnimeProfileName' -Value $ProfileName
-        Set-JsonProperty -Object $instance -Name 'activeAnimeDirectory' -Value '/data/media/tv'
+        Set-JsonProperty -Object $instance -Name 'activeAnimeProfileId' -Value $AnimeProfileId
+        Set-JsonProperty -Object $instance -Name 'activeAnimeProfileName' -Value $AnimeProfileName
+        Set-JsonProperty -Object $instance -Name 'activeAnimeDirectory' -Value '/data/media/anime'
         Set-JsonProperty -Object $instance -Name 'tags' -Value @()
         Set-JsonProperty -Object $instance -Name 'animeTags' -Value @()
         Set-JsonProperty -Object $instance -Name 'is4k' -Value $false
@@ -227,13 +242,15 @@ Write-Host 'Fetching quality profiles from Sonarr...'
 $sonarrProfiles = Get-ArrQualityProfiles -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey -AppName 'Sonarr'
 $sonarrProfileId = Find-ProfileId -Profiles $sonarrProfiles -Names @('WEB-1080p', 'HD-1080p', '[Anime] Remux-1080p')
 $sonarrProfileName = ($sonarrProfiles | Where-Object { $_.id -eq $sonarrProfileId }).name
+$sonarrAnimeProfileId = Get-RequiredProfileId -Profiles $sonarrProfiles -Name '[Anime] Remux-1080p'
+$sonarrAnimeProfileName = ($sonarrProfiles | Where-Object { $_.id -eq $sonarrAnimeProfileId }).name
 
 echo "Fetching quality profiles from Radarr..."
 $radarrProfiles = Get-ArrQualityProfiles -BaseUrl $RadarrExternalUrl -ApiKey $radarrApiKey -AppName 'Radarr'
 $radarrProfileId = Find-ProfileId -Profiles $radarrProfiles -Names @('HD Bluray + WEB', 'HD-1080p', 'Remux-1080p')
 $radarrProfileName = ($radarrProfiles | Where-Object { $_.id -eq $radarrProfileId }).name
 
-Update-SeerrSettings -SettingsPath '.\config\seerr\settings.json' -Service 'sonarr' -ProfileId $sonarrProfileId -ProfileName $sonarrProfileName -ApiKey $sonarrApiKey
+Update-SeerrSettings -SettingsPath '.\config\seerr\settings.json' -Service 'sonarr' -ProfileId $sonarrProfileId -ProfileName $sonarrProfileName -ApiKey $sonarrApiKey -AnimeProfileId $sonarrAnimeProfileId -AnimeProfileName $sonarrAnimeProfileName
 Update-SeerrSettings -SettingsPath '.\config\seerr\settings.json' -Service 'radarr' -ProfileId $radarrProfileId -ProfileName $radarrProfileName -ApiKey $radarrApiKey
 
 Write-Host 'Seerr bootstrap complete. Restart Seerr to reload settings:'

@@ -19,6 +19,7 @@ param(
     [int[]]$SonarrAnimeSyncCategories = @(5070),
     [int[]]$RadarrSyncCategories = @(2000),
     [string]$TvRootFolder = '/data/media/tv',
+    [string]$AnimeRootFolder = '/data/media/anime',
     [string]$MovieRootFolder = '/data/media/movies'
 )
 
@@ -1051,6 +1052,59 @@ function Ensure-RootFolder {
     Write-Host "Created $AppName root folder: $Path"
 }
 
+function Sync-RecyclarrBaseline {
+    param(
+        [string]$SonarrApiKey,
+        [string]$RadarrApiKey
+    )
+
+    New-Item -ItemType Directory -Force -Path '.\config\recyclarr' | Out-Null
+    if (-not (Test-Path '.\config\recyclarr\recyclarr.yml')) {
+        Copy-Item '.\recyclarr.example.yml' '.\config\recyclarr\recyclarr.yml'
+        Write-Host 'Created Recyclarr config from validated v8 baseline.'
+    }
+
+    $previousSonarrApiKey = $env:SONARR_API_KEY
+    $previousRadarrApiKey = $env:RADARR_API_KEY
+    try {
+        $env:SONARR_API_KEY = $SonarrApiKey
+        $env:RADARR_API_KEY = $RadarrApiKey
+        docker compose run --rm recyclarr sync | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Recyclarr profile synchronization failed with exit code $LASTEXITCODE."
+        }
+    }
+    finally {
+        if ($null -eq $previousSonarrApiKey) { Remove-Item Env:SONARR_API_KEY -ErrorAction SilentlyContinue } else { $env:SONARR_API_KEY = $previousSonarrApiKey }
+        if ($null -eq $previousRadarrApiKey) { Remove-Item Env:RADARR_API_KEY -ErrorAction SilentlyContinue } else { $env:RADARR_API_KEY = $previousRadarrApiKey }
+    }
+    Write-Host 'Recyclarr series and anime quality profiles synchronized.'
+}
+
+function Set-AnimeSeriesTypes {
+    param(
+        [string]$BaseUrl,
+        [string]$ApiKey,
+        [string]$RootFolder
+    )
+
+    $prefix = "$($RootFolder.TrimEnd('/'))/"
+    $series = @(Invoke-ArrApi -Method GET -Uri "$BaseUrl/api/v3/series" -ApiKey $ApiKey)
+    $changed = 0
+    foreach ($item in $series) {
+        if (-not ([string]$item.path).StartsWith($prefix, [System.StringComparison]::Ordinal) -or $item.seriesType -eq 'anime') {
+            continue
+        }
+        Set-ObjectProperty -Object $item -Name 'seriesType' -Value 'anime'
+        Invoke-ArrApi -Method PUT -Uri "$BaseUrl/api/v3/series/$($item.id)" -ApiKey $ApiKey -Body $item | Out-Null
+        Write-Host "Sonarr series type set to anime: $($item.title)"
+        $changed++
+    }
+    if ($changed -eq 0) {
+        Write-Host "Sonarr anime series types verified for $RootFolder."
+    }
+}
+
 Test-BootstrapEnvironment
 
 if (-not $QbitUsername) { $QbitUsername = 'admin' }
@@ -1091,6 +1145,7 @@ else {
 
 Ensure-SonarrNamingConfig -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey
 Ensure-SonarrMediaManagementConfig -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey
+Sync-RecyclarrBaseline -SonarrApiKey $sonarrApiKey -RadarrApiKey $radarrApiKey
 
 Upsert-SabnzbdDownloadClient -AppName 'Sonarr' -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey -SabnzbdApiKey $sabnzbdApiKey -CategoryField 'tvCategory' -Category $TvCategory
 Upsert-SabnzbdDownloadClient -AppName 'Radarr' -BaseUrl $RadarrExternalUrl -ApiKey $radarrApiKey -SabnzbdApiKey $sabnzbdApiKey -CategoryField 'movieCategory' -Category $MovieCategory
@@ -1098,6 +1153,8 @@ Upsert-QbitDownloadClient -AppName 'Sonarr' -BaseUrl $SonarrExternalUrl -ApiKey 
 Upsert-QbitDownloadClient -AppName 'Radarr' -BaseUrl $RadarrExternalUrl -ApiKey $radarrApiKey -CategoryField 'movieCategory' -Category $MovieCategory
 
 Ensure-RootFolder -AppName 'Sonarr' -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey -Path $TvRootFolder
+Ensure-RootFolder -AppName 'Sonarr' -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey -Path $AnimeRootFolder
+Set-AnimeSeriesTypes -BaseUrl $SonarrExternalUrl -ApiKey $sonarrApiKey -RootFolder $AnimeRootFolder
 Ensure-RootFolder -AppName 'Radarr' -BaseUrl $RadarrExternalUrl -ApiKey $radarrApiKey -Path $MovieRootFolder
 
 Write-Host ''

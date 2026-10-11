@@ -13,6 +13,8 @@
 # Preview before applying:
 #   .\stack.ps1 sync-profiles --preview
 #
+# Recyclarr v8 uses quality-profile trash IDs and custom_format_groups. The old
+# `include: template:` examples are obsolete and fail current schema validation.
 # Each profile's required custom formats and TRaSH scores are pulled in
 # automatically. To add optional format groups or skip default ones, see
 # https://recyclarr.dev/guide/cf-groups/ and the upstream templates at

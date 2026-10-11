@@ -586,7 +586,7 @@ configure_jellyfin() {
     [[ -n "${session:-}" ]] || fail "Jellyfin did not accept JELLYFIN_USER/JELLYFIN_PASS after initialization."
   fi
 
-  local token auth server_name config libraries name type path query body
+  local token auth server_name config libraries name type path options_mode query body library_id user_id user_config
   token="$(jq -r '.AccessToken' <<<"$session")"
   [[ -n "$token" && "$token" != null ]] || fail "Jellyfin authentication returned no token."
   auth="MediaBrowser Token=\"$token\", Client=\"media-stack\", Device=\"bootstrap\", DeviceId=\"media-stack-bootstrap\", Version=\"1.0\""
@@ -598,10 +598,26 @@ configure_jellyfin() {
     --data-binary "$(jq --arg name "$server_name" '.ServerName=$name' <<<"$config")" >/dev/null
   ensure_moonbase_plugin "$auth"
 
-  for spec in 'Movies|movies|/data/media/movies' 'Shows|tvshows|/data/media/tv'; do
-    IFS='|' read -r name type path <<<"$spec"
+  for spec in 'Movies|movies|/data/media/movies|default' 'Shows|tvshows|/data/media/tv|default' 'Anime|tvshows|/data/media/anime|anime'; do
+    IFS='|' read -r name type path options_mode <<<"$spec"
     libraries="$(curl -sS -f "$JELLYFIN_URL/Library/VirtualFolders" -H "Authorization: $auth")"
     if jq -e --arg name "$name" --arg path "$path" '.[] | select(.Name==$name) | .Locations[]? | select(.==$path)' <<<"$libraries" >/dev/null; then
+      if [[ "$options_mode" == anime ]]; then
+        library_id="$(jq -r --arg name "$name" '.[] | select(.Name==$name) | (.ItemId // .Id // empty)' <<<"$libraries" | head -n 1)"
+        body="$(jq -c --arg name "$name" '
+          .[] | select(.Name==$name) | .LibraryOptions |
+          .TypeOptions = (.TypeOptions | map(
+            if .Type == "Series" then
+              .ImageOptions = ((.ImageOptions // []) | map(select(.Type != "Backdrop")) + [{Type:"Backdrop",Limit:0,MinWidth:0}])
+            else . end
+          ))
+        ' <<<"$libraries")"
+        [[ -n "$library_id" && -n "$body" ]] || fail "Jellyfin did not expose the Anime library ID and options."
+        curl -sS -f -X POST "$JELLYFIN_URL/Library/VirtualFolders/LibraryOptions" \
+          -H "Authorization: $auth" -H 'Content-Type: application/json' \
+          --data-binary "$(jq -nc --arg id "$library_id" --argjson options "$body" '{Id:$id,LibraryOptions:$options}')" >/dev/null
+        echo "Jellyfin Anime library backdrop generation disabled."
+      fi
       echo "Jellyfin library verified: $name -> $path"
       continue
     fi
@@ -610,8 +626,23 @@ configure_jellyfin() {
       curl -sS -f -X POST "$JELLYFIN_URL/Library/VirtualFolders/Paths?$query" \
         -H "Authorization: $auth" -H 'Content-Type: application/json' \
         --data-binary "$(jq -nc --arg name "$name" --arg path "$path" '{Name:$name,Path:$path}')" >/dev/null
+      if [[ "$options_mode" == anime ]]; then
+        libraries="$(curl -sS -f "$JELLYFIN_URL/Library/VirtualFolders" -H "Authorization: $auth")"
+        library_id="$(jq -r --arg name "$name" '.[] | select(.Name==$name) | (.ItemId // .Id // empty)' <<<"$libraries" | head -n 1)"
+        body="$(jq -c --arg name "$name" '
+          .[] | select(.Name==$name) | .LibraryOptions |
+          .TypeOptions = (.TypeOptions | map(
+            if .Type == "Series" then
+              .ImageOptions = ((.ImageOptions // []) | map(select(.Type != "Backdrop")) + [{Type:"Backdrop",Limit:0,MinWidth:0}])
+            else . end
+          ))
+        ' <<<"$libraries")"
+        curl -sS -f -X POST "$JELLYFIN_URL/Library/VirtualFolders/LibraryOptions" \
+          -H "Authorization: $auth" -H 'Content-Type: application/json' \
+          --data-binary "$(jq -nc --arg id "$library_id" --argjson options "$body" '{Id:$id,LibraryOptions:$options}')" >/dev/null
+      fi
     else
-      body="$(jq -nc --arg path "$path" --arg type "$type" '{
+      body="$(jq -nc --arg path "$path" --arg type "$type" --arg options_mode "$options_mode" '{
         Enabled:true,EnablePhotos:true,EnableRealtimeMonitor:true,EnableInternetProviders:true,
         EnableLUFSScan:true,EnableChapterImageExtraction:false,
         ExtractChapterImagesDuringLibraryScan:false,EnableTrickplayImageExtraction:false,
@@ -637,7 +668,9 @@ configure_jellyfin() {
         }] else [
           {Type:"Series",MetadataFetchers:["TheMovieDb","The Open Movie Database"],
            MetadataFetcherOrder:["TheMovieDb","The Open Movie Database"],ImageFetchers:["TheMovieDb"],
-           ImageFetcherOrder:["TheMovieDb"],ImageOptions:[],SimilarItemProviders:["Local Genre/Tag"],
+           ImageFetcherOrder:["TheMovieDb"],
+           ImageOptions:(if $options_mode=="anime" then [{Type:"Backdrop",Limit:0,MinWidth:0}] else [] end),
+           SimilarItemProviders:["Local Genre/Tag"],
            SimilarItemProviderOrder:["TheMovieDb","Local Genre/Tag"]},
           {Type:"Season",MetadataFetchers:["TheMovieDb"],MetadataFetcherOrder:["TheMovieDb"],
            ImageFetchers:["TheMovieDb"],ImageFetcherOrder:["TheMovieDb"],ImageOptions:[],
@@ -654,6 +687,15 @@ configure_jellyfin() {
     fi
     echo "Jellyfin library configured: $name -> $path"
   done
+
+  user_id="$(jq -r '.User.Id // empty' <<<"$session")"
+  [[ -n "$user_id" ]] || fail "Jellyfin authentication response did not include the administrator user ID."
+  user_config="$(curl -sS -f "$JELLYFIN_URL/Users/$user_id" -H "Authorization: $auth" | jq '.Configuration')"
+  user_config="$(jq '.SubtitleLanguagePreference="eng" | .SubtitleMode="Always"' <<<"$user_config")"
+  curl -sS -f -X POST "$JELLYFIN_URL/Users/Configuration?userId=$user_id" \
+    -H "Authorization: $auth" -H 'Content-Type: application/json' \
+    --data-binary "$user_config" >/dev/null
+  echo "Jellyfin administrator subtitle preferences configured: English, Always."
 
   export JELLYFIN_LIVETV_PATH='config/jellyfin/livetv.xml'
   python3 <<'PY'
@@ -965,6 +1007,31 @@ ensure_root_folder() {
   echo "$app root folder verified: $path"
 }
 
+sync_recyclarr_baseline() {
+  mkdir -p config/recyclarr
+  if [[ ! -f config/recyclarr/recyclarr.yml ]]; then
+    cp recyclarr.example.yml config/recyclarr/recyclarr.yml
+    echo "Created Recyclarr config from validated v8 baseline."
+  fi
+  docker compose run --rm recyclarr sync >/dev/null
+  echo "Recyclarr series and anime quality profiles synchronized."
+}
+
+ensure_anime_series_types() {
+  local series changed=0 id title
+  series="$(api GET "$SONARR_URL/api/v3/series" "$SONARR_API_KEY")"
+  while IFS= read -r item; do
+    id="$(jq -r '.id' <<<"$item")"
+    title="$(jq -r '.title' <<<"$item")"
+    api PUT "$SONARR_URL/api/v3/series/$id" "$SONARR_API_KEY" "$(jq '.seriesType="anime"' <<<"$item")" >/dev/null
+    echo "Sonarr series type set to anime: $title"
+    changed=$((changed + 1))
+  done < <(jq -c '.[] | select((.path | startswith("/data/media/anime/")) and .seriesType != "anime")' <<<"$series")
+  if ((changed == 0)); then
+    echo "Sonarr anime series types verified for /data/media/anime."
+  fi
+}
+
 configure_seerr_services() {
   bash ./scripts/bootstrap-seerr.sh "$SONARR_URL" "$RADARR_URL"
   docker compose restart seerr >/dev/null
@@ -1000,11 +1067,14 @@ main() {
   upsert_prowlarr_app Radarr Radarr RadarrSettings 'http://radarr:7878' "$RADARR_API_KEY"
   import_indexers indexers.json 0
   configure_sonarr_baseline
+  sync_recyclarr_baseline
   upsert_download_client Sonarr "$SONARR_URL" "$SONARR_API_KEY" Sabnzbd SABnzbd tvCategory tv 1
   upsert_download_client Radarr "$RADARR_URL" "$RADARR_API_KEY" Sabnzbd SABnzbd movieCategory movies 1
   upsert_download_client Sonarr "$SONARR_URL" "$SONARR_API_KEY" QBittorrent qBittorrent tvCategory tv 2
   upsert_download_client Radarr "$RADARR_URL" "$RADARR_API_KEY" QBittorrent qBittorrent movieCategory movies 2
   ensure_root_folder Sonarr "$SONARR_URL" "$SONARR_API_KEY" /data/media/tv
+  ensure_root_folder Sonarr "$SONARR_URL" "$SONARR_API_KEY" /data/media/anime
+  ensure_anime_series_types
   ensure_root_folder Radarr "$RADARR_URL" "$RADARR_API_KEY" /data/media/movies
   configure_seerr_services
   echo "Bootstrap complete."

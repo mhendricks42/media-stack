@@ -9,6 +9,7 @@ Usage:
   ./stack.sh install-service [systemd installer options]
   ./stack.sh up|down|ps|pull|config
   ./stack.sh setup-data
+  ./stack.sh audit-anime
   source ./scripts/set-env.sh [--include-tailscale]
   ./stack.sh bootstrap
   ./stack.sh import-indexers [path] [--dry-run]
@@ -254,7 +255,7 @@ doctor() {
   done
 
   if [[ -n "$(docker compose ps -q sonarr)" ]]; then
-    if docker compose exec -T sonarr sh -lc "test -d /data/usenet/incomplete -a -d /data/usenet/complete/tv -a -d /data/usenet/complete/movies -a -d /data/torrents -a -d /data/media/tv -a -d /data/media/movies" >/dev/null 2>&1; then write_check "data folders exist" 0; else write_check "data folders exist" 1; fi
+    if docker compose exec -T sonarr sh -lc "test -d /data/usenet/incomplete -a -d /data/usenet/complete/tv -a -d /data/usenet/complete/movies -a -d /data/torrents -a -d /data/media/tv -a -d /data/media/movies -a -d /data/media/anime -a -d /data/media/anime-movies" >/dev/null 2>&1; then write_check "data folders exist" 0; else write_check "data folders exist" 1; fi
     if docker compose exec -T sonarr sh -lc "rm -f /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; echo test > /data/usenet/complete/tv/doctor-hardlink.txt; ln /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; count=\$(stat -c '%h' /data/usenet/complete/tv/doctor-hardlink.txt); rm -f /data/usenet/complete/tv/doctor-hardlink.txt /data/media/tv/doctor-hardlink.txt; test \"\$count\" = 2" >/dev/null 2>&1; then write_check "hardlinks work" 0; else write_check "hardlinks work" 1; fi
   fi
 
@@ -324,7 +325,9 @@ case "$cmd" in
         /data/torrents/incomplete \
         /data/media \
         /data/media/tv \
-        /data/media/movies
+        /data/media/movies \
+        /data/media/anime \
+        /data/media/anime-movies
       do
         if [ -d "$path" ]; then
           echo "Keeping existing directory: $path"
@@ -339,6 +342,10 @@ case "$cmd" in
       ls -la /data/usenet
       ls -la /data/media
     '
+    ;;
+  audit-anime)
+    check_docker_engine
+    bash ./scripts/audit-anime.sh
     ;;
   bootstrap)
     check_docker_engine
