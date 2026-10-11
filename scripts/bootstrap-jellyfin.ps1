@@ -283,7 +283,7 @@ function New-JellyfinLibraryOptions {
                 MetadataFetcherOrder = @('TheMovieDb', 'The Open Movie Database')
                 ImageFetchers = @('TheMovieDb')
                 ImageFetcherOrder = @('TheMovieDb')
-                ImageOptions = @()
+                ImageOptions = $(if ($DisableBackdrops) { @(@{ Type = 'Backdrop'; Limit = 0; MinWidth = 0 }) } else { @() })
                 SimilarItemProviders = @('Local Genre/Tag')
                 SimilarItemProviderOrder = @('TheMovieDb', 'Local Genre/Tag')
             },
@@ -392,13 +392,23 @@ function Ensure-JellyfinLibrary {
                 -Headers $Headers -Body @{ Id = $libraryId; LibraryOptions = $options } | Out-Null
             Write-Host "Jellyfin library options reconciled: $Name"
         }
+        $updated = @(Invoke-JsonRequest -Method GET -Uri 'http://localhost:8096/Library/VirtualFolders' -Headers $Headers)
+        $updatedLibrary = $updated | Where-Object { $_.Name -eq $Name -and @($_.Locations) -contains $Path } | Select-Object -First 1
+        if (-not $updatedLibrary) {
+            throw "Jellyfin accepted the $Name library request but did not attach $Path."
+        }
         return
     }
 
     $options = New-JellyfinLibraryOptions -CollectionType $CollectionType -Path $Path -DisableBackdrops:$DisableBackdrops
-    Invoke-JsonRequest -Method POST -Uri "http://localhost:8096/Library/VirtualFolders?name=$([uri]::EscapeDataString($Name))&collectionType=$([uri]::EscapeDataString($CollectionType))&refreshLibrary=false" `
+    Invoke-JsonRequest -Method POST -Uri "http://localhost:8096/Library/VirtualFolders?name=$([uri]::EscapeDataString($Name))&collectionType=$([uri]::EscapeDataString($CollectionType))&paths=$([uri]::EscapeDataString($Path))&refreshLibrary=false" `
         -Headers $Headers `
-        -Body $options | Out-Null
+        -Body @{ LibraryOptions = $options } | Out-Null
+    $updated = @(Invoke-JsonRequest -Method GET -Uri 'http://localhost:8096/Library/VirtualFolders' -Headers $Headers)
+    $updatedLibrary = $updated | Where-Object { $_.Name -eq $Name -and @($_.Locations) -contains $Path } | Select-Object -First 1
+    if (-not $updatedLibrary) {
+        throw "Jellyfin accepted the $Name library request but did not attach $Path."
+    }
     Write-Host "Jellyfin library created: $Name -> $Path"
 }
 

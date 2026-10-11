@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $sonarrUrl = if ($env:SONARR_URL) { $env:SONARR_URL } else { 'http://localhost:8989' }
+$jellyfinUrl = if ($env:JELLYFIN_URL) { $env:JELLYFIN_URL } else { 'http://localhost:8096' }
 $configPath = '.\config\sonarr\config.xml'
 $seerrSettingsPath = '.\config\seerr\settings.json'
 
@@ -10,6 +11,9 @@ if (-not (Test-Path $configPath)) {
 $apiKey = [string]([xml](Get-Content $configPath)).Config.ApiKey
 if (-not $apiKey) {
     throw "Sonarr API key is missing from $configPath"
+}
+if (-not $env:JELLYFIN_USER -or -not $env:JELLYFIN_PASS) {
+    throw 'JELLYFIN_USER and JELLYFIN_PASS are required to audit the Anime library.'
 }
 $headers = @{ 'X-Api-Key' = $apiKey }
 
@@ -44,4 +48,21 @@ if ($sonarr.activeAnimeDirectory -ne '/data/media/anime' -or -not ([string]$sona
     throw 'Seerr anime root/profile override is not configured.'
 }
 Write-Host 'PASS: Seerr anime root and quality profile'
+
+$clientAuthorization = 'MediaBrowser Client="media-stack", Device="anime-audit", DeviceId="media-stack-anime-audit", Version="1.0"'
+$session = Invoke-RestMethod -Method POST -Uri "$jellyfinUrl/Users/AuthenticateByName" `
+    -Headers @{ Authorization = $clientAuthorization } `
+    -ContentType 'application/json' `
+    -Body (@{ Username = $env:JELLYFIN_USER; Pw = $env:JELLYFIN_PASS } | ConvertTo-Json) `
+    -TimeoutSec 10
+if (-not $session.AccessToken) {
+    throw 'Jellyfin authentication returned no access token.'
+}
+$tokenAuthorization = "MediaBrowser Token=`"$($session.AccessToken)`", Client=`"media-stack`", Device=`"anime-audit`", DeviceId=`"media-stack-anime-audit`", Version=`"1.0`""
+$libraries = @(Invoke-RestMethod -Method GET -Uri "$jellyfinUrl/Library/VirtualFolders" -Headers @{ Authorization = $tokenAuthorization } -TimeoutSec 10)
+$animeLibrary = $libraries | Where-Object { $_.Name -eq 'Anime' -and @($_.Locations) -contains '/data/media/anime' } | Select-Object -First 1
+if (-not $animeLibrary) {
+    throw 'Jellyfin Anime library is missing /data/media/anime.'
+}
+Write-Host 'PASS: Jellyfin Anime library path'
 Write-Host 'Anime automation baseline verified.'

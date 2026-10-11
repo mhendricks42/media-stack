@@ -623,7 +623,7 @@ configure_jellyfin() {
     fi
     query="name=$(jq -rn --arg value "$name" '$value|@uri')"
     if jq -e --arg name "$name" '.[] | select(.Name==$name)' <<<"$libraries" >/dev/null; then
-      curl -sS -f -X POST "$JELLYFIN_URL/Library/VirtualFolders/Paths?$query" \
+      curl -sS -f -X POST "$JELLYFIN_URL/Library/VirtualFolders/Paths?refreshLibrary=false" \
         -H "Authorization: $auth" -H 'Content-Type: application/json' \
         --data-binary "$(jq -nc --arg name "$name" --arg path "$path" '{Name:$name,Path:$path}')" >/dev/null
       if [[ "$options_mode" == anime ]]; then
@@ -682,9 +682,16 @@ configure_jellyfin() {
            ImageOptions:[],SimilarItemProviders:[],SimilarItemProviderOrder:[]}
         ] end)
       }')"
-      curl -sS -f -X POST "$JELLYFIN_URL/Library/VirtualFolders?$query&collectionType=$type&refreshLibrary=false" \
-        -H "Authorization: $auth" -H 'Content-Type: application/json' --data-binary "$body" >/dev/null
+      local encoded_path
+      encoded_path="$(jq -rn --arg value "$path" '$value|@uri')"
+      curl -sS -f -X POST "$JELLYFIN_URL/Library/VirtualFolders?$query&collectionType=$type&paths=$encoded_path&refreshLibrary=false" \
+        -H "Authorization: $auth" -H 'Content-Type: application/json' \
+        --data-binary "$(jq -nc --argjson options "$body" '{LibraryOptions:$options}')" >/dev/null
     fi
+    libraries="$(curl -sS -f "$JELLYFIN_URL/Library/VirtualFolders" -H "Authorization: $auth")"
+    jq -e --arg name "$name" --arg path "$path" \
+      '.[] | select(.Name==$name) | .Locations[]? | select(.==$path)' <<<"$libraries" >/dev/null ||
+      fail "Jellyfin accepted the $name library request but did not attach $path."
     echo "Jellyfin library configured: $name -> $path"
   done
 
